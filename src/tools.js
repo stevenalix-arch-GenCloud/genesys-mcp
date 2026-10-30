@@ -237,7 +237,36 @@ export const TOOLS = [
       return { assigned: true, user: user.name || user.id, skill: r.name, proficiency: r.proficiency };
     },
   },
+  {
+  name: 'remove_user_skill',
+  description: 'Remove a routing skill from a user. Removes only the specified skill and leaves all other skills unchanged.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      user: { type: 'string', description: 'Email, name, or id' },
+      skill: { type: 'string', description: 'Skill name or id' },
+    },
+    required: ['user', 'skill'],
+    additionalProperties: false,
+  },
+  handler: async (gc, a) => {
+    const [user, skill] = await Promise.all([
+      resolveUser(gc, a.user),
+      resolveOne(gc, 'skill', '/api/v2/routing/skills', a.skill),
+    ]);
 
+    await gc.api(
+      'DELETE',
+      `/api/v2/users/${user.id}/routingskills/${skill.id}`
+    );
+
+    return {
+      removed: true,
+      user: user.name || user.id,
+      skill: skill.name || skill.id,
+    };
+  },
+},
   // ----- flows (Architect) -----
   {
     name: 'list_flows',
