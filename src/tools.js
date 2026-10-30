@@ -105,6 +105,100 @@ export const TOOLS = [
     handler: async (gc, a) => gc.get(`/api/v2/routing/queues/${(await resolveOne(gc, 'queue', '/api/v2/routing/queues', a.queue)).id}`),
   },
   {
+  name: 'add_queue_members',
+  description: 'Add one or more users as members of an existing Genesys Cloud routing queue. Existing queue members are not removed.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      queue: {
+        type: 'string',
+        description: 'Queue name or id'
+      },
+      users: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'User names, email addresses, or ids'
+      }
+    },
+    required: ['queue', 'users'],
+    additionalProperties: false,
+  },
+  handler: async (gc, a) => {
+    if (!Array.isArray(a.users) || !a.users.length) {
+      throw new GenesysError('users must be a non-empty array', 400);
+    }
+
+    const queue = await resolveOne(
+      gc,
+      'queue',
+      '/api/v2/routing/queues',
+      a.queue
+    );
+
+    const users = [];
+    for (const ref of a.users) {
+      users.push(await resolveUser(gc, ref));
+    }
+
+    const body = users.map((user) => ({
+      id: user.id
+    }));
+
+    await gc.post(
+      `/api/v2/routing/queues/${queue.id}/members`,
+      body
+    );
+
+    return {
+      added: true,
+      queue: queue.name || queue.id,
+      membersAdded: users.map((user) => ({
+        id: user.id,
+        name: user.name,
+        email: user.email
+      }))
+    };
+  },
+},
+  {
+  name: 'list_queue_members',
+  description: 'List the users who are members of a Genesys Cloud routing queue.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      queue: {
+        type: 'string',
+        description: 'Queue name or id'
+      }
+    },
+    required: ['queue'],
+    additionalProperties: false,
+  },
+  handler: async (gc, a) => {
+    const queue = await resolveOne(
+      gc,
+      'queue',
+      '/api/v2/routing/queues',
+      a.queue
+    );
+
+    const r = await gc.listAll(
+      `/api/v2/routing/queues/${queue.id}/members`
+    );
+
+    return {
+      queue: queue.name || queue.id,
+      total: r.total,
+      members: r.entities.map((m) => ({
+        id: m.id,
+        name: m.name,
+        email: m.email,
+        joined: m.joined
+      }))
+    };
+  },
+},
+  {
     name: 'create_queue',
     description: 'Create a new routing queue. Only name is required; Genesys applies sensible media-setting defaults. Optionally set description, division (name or id), and ACW settings.',
     inputSchema: {
@@ -1010,7 +1104,7 @@ export async function callTool(cfg, name, args = {}) {
 
 // UI metadata - which tools are writes, and how they group on the landing page.
 export const WRITE_TOOLS = new Set([
-  'create_queue', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill',
+  'create_queue','add_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill',
   'create_schedule', 'create_schedule_group',
   'create_contact_list', 'add_contacts', 'create_attempt_limits',
   'create_callable_time_set', 'create_dnc_list', 'create_campaign',
@@ -1021,7 +1115,7 @@ export const WRITE_TOOLS = new Set([
 
 export const TOOL_GROUPS = [
   { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
-  { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_wrapup_codes', 'create_wrapup_code'] },
+  { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue','list_queue_members','add_queue_members','list_wrapup_codes', 'create_wrapup_code'] },
   { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill'] },
   { name: 'Schedules & Hours', icon: '🕐', tools: ['list_schedules', 'create_schedule', 'create_schedule_group'] },
   { name: 'Outbound (Campaigns & Cadences)', icon: '📤', tools: ['list_contact_lists', 'get_contact_list', 'create_contact_list', 'add_contacts', 'create_attempt_limits', 'create_callable_time_set', 'create_dnc_list', 'list_campaigns', 'get_campaign', 'create_campaign', 'create_campaign_sequence', 'list_outbound_assets', 'render_cadence'] },
