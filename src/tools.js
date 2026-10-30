@@ -104,28 +104,40 @@ export const TOOLS = [
     },
     handler: async (gc, a) => gc.get(`/api/v2/routing/queues/${(await resolveOne(gc, 'queue', '/api/v2/routing/queues', a.queue)).id}`),
   },
-  {
-  name: 'add_queue_members',
-  description: 'Add one or more users as members of an existing Genesys Cloud routing queue. Existing queue members are not removed.',
+{
+  name: 'update_queue_members',
+  description: 'Update membership of an existing Genesys Cloud routing queue. Use this tool whenever users need to be added to or removed from a queue. Only the specifically requested users are changed; all other queue members remain unchanged.',
   inputSchema: {
     type: 'object',
     properties: {
       queue: {
         type: 'string',
-        description: 'Queue name or id'
+        description: 'Queue name or id',
       },
-      users: {
+      add: {
         type: 'array',
         items: { type: 'string' },
-        description: 'User names, email addresses, or ids'
-      }
+        description: 'Users to add to the queue, specified by name, email, or id',
+      },
+      remove: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Users to remove from the queue, specified by name, email, or id',
+      },
     },
-    required: ['queue', 'users'],
+    required: ['queue'],
     additionalProperties: false,
   },
+
   handler: async (gc, a) => {
-    if (!Array.isArray(a.users) || !a.users.length) {
-      throw new GenesysError('users must be a non-empty array', 400);
+    const add = Array.isArray(a.add) ? a.add : [];
+    const remove = Array.isArray(a.remove) ? a.remove : [];
+
+    if (!add.length && !remove.length) {
+      throw new GenesysError(
+        'Provide at least one user in add or remove.',
+        400
+      );
     }
 
     const queue = await resolveOne(
@@ -135,28 +147,56 @@ export const TOOLS = [
       a.queue
     );
 
-    const users = [];
-    for (const ref of a.users) {
-      users.push(await resolveUser(gc, ref));
+    const added = [];
+    const removed = [];
+
+    // Add requested users
+    if (add.length) {
+      const usersToAdd = [];
+
+      for (const ref of add) {
+        usersToAdd.push(await resolveUser(gc, ref));
+      }
+
+      await gc.post(
+        `/api/v2/routing/queues/${queue.id}/members`,
+        usersToAdd.map((user) => ({
+          id: user.id,
+        }))
+      );
+
+      for (const user of usersToAdd) {
+        added.push({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+        });
+      }
     }
 
-    const body = users.map((user) => ({
-      id: user.id
-    }));
+    // Remove requested users
+    for (const ref of remove) {
+      const user = await resolveUser(gc, ref);
 
-    await gc.post(
-      `/api/v2/routing/queues/${queue.id}/members`,
-      body
-    );
+      await gc.api(
+        'DELETE',
+        `/api/v2/routing/queues/${queue.id}/members/${user.id}`
+      );
 
-    return {
-      added: true,
-      queue: queue.name || queue.id,
-      membersAdded: users.map((user) => ({
+      removed.push({
         id: user.id,
         name: user.name,
-        email: user.email
-      }))
+        email: user.email,
+      });
+    }
+
+    return {
+      updated: true,
+      queue: queue.name || queue.id,
+      queueId: queue.id,
+      added,
+      removed,
+      note: 'Only the requested membership changes were made. Other queue members were left unchanged.',
     };
   },
 },
@@ -1104,7 +1144,7 @@ export async function callTool(cfg, name, args = {}) {
 
 // UI metadata - which tools are writes, and how they group on the landing page.
 export const WRITE_TOOLS = new Set([
-  'create_queue', 'add_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill',
+  'create_queue', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill',
   'create_schedule', 'create_schedule_group',
   'create_contact_list', 'add_contacts', 'create_attempt_limits',
   'create_callable_time_set', 'create_dnc_list', 'create_campaign',
@@ -1115,7 +1155,7 @@ export const WRITE_TOOLS = new Set([
 
 export const TOOL_GROUPS = [
   { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
-  { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'add_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
+  { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'update_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
   { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill'] },
   { name: 'Schedules & Hours', icon: '🕐', tools: ['list_schedules', 'create_schedule', 'create_schedule_group'] },
   { name: 'Outbound (Campaigns & Cadences)', icon: '📤', tools: ['list_contact_lists', 'get_contact_list', 'create_contact_list', 'add_contacts', 'create_attempt_limits', 'create_callable_time_set', 'create_dnc_list', 'list_campaigns', 'get_campaign', 'create_campaign', 'create_campaign_sequence', 'list_outbound_assets', 'render_cadence'] },
