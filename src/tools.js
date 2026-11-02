@@ -327,6 +327,55 @@ export const TOOLS = [
     },
   },
   {
+  name: 'create_user',
+  description: 'Create a new Genesys Cloud user. Requires first name, last name, and email address.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      first_name: {
+        type: 'string',
+        description: 'User first name',
+      },
+      last_name: {
+        type: 'string',
+        description: 'User last name',
+      },
+      email: {
+        type: 'string',
+        description: 'User email address',
+      },
+    },
+    required: ['first_name', 'last_name', 'email'],
+    additionalProperties: false,
+  },
+
+  handler: async (gc, a) => {
+    const firstName = a.first_name.trim();
+    const lastName = a.last_name.trim();
+    const email = a.email.trim().toLowerCase();
+
+    if (!firstName || !lastName || !email) {
+      throw new GenesysError(
+        'first_name, last_name, and email are required.',
+        400
+      );
+    }
+
+    const user = await gc.post('/api/v2/users', {
+      name: `${firstName} ${lastName}`,
+      email,
+    });
+
+    return {
+      created: true,
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      state: user.state,
+    };
+  },
+},
+  {
     name: 'list_skills',
     description: 'List ACD routing skills.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
@@ -1144,7 +1193,7 @@ export async function callTool(cfg, name, args = {}) {
 
 // UI metadata - which tools are writes, and how they group on the landing page.
 export const WRITE_TOOLS = new Set([
-  'create_queue', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill',
+  'create_queue', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill' 'create_user',
   'create_schedule', 'create_schedule_group',
   'create_contact_list', 'add_contacts', 'create_attempt_limits',
   'create_callable_time_set', 'create_dnc_list', 'create_campaign',
@@ -1156,7 +1205,7 @@ export const WRITE_TOOLS = new Set([
 export const TOOL_GROUPS = [
   { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
   { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'update_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
-  { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill'] },
+  { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'create_user'] },
   { name: 'Schedules & Hours', icon: '🕐', tools: ['list_schedules', 'create_schedule', 'create_schedule_group'] },
   { name: 'Outbound (Campaigns & Cadences)', icon: '📤', tools: ['list_contact_lists', 'get_contact_list', 'create_contact_list', 'add_contacts', 'create_attempt_limits', 'create_callable_time_set', 'create_dnc_list', 'list_campaigns', 'get_campaign', 'create_campaign', 'create_campaign_sequence', 'list_outbound_assets', 'render_cadence'] },
   { name: 'Flows (Architect)', icon: '🌳', tools: ['list_flows', 'get_flow', 'get_flow_configuration', 'list_prompts', 'render_flow', 'export_flow'] },
