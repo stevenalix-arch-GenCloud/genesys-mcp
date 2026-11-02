@@ -183,4 +183,4 @@ Before executing a division write through genesys_api_call:
 4. After confirmation, execute the request with genesys_api_call.
 5. Report success only if Genesys Cloud confirms the operation.
 
-OAuth, credential, role, subject, and permission writes remain prohibited.';
+OAuth, credential, role, subject, and permission writes remain prohibited.`;
