@@ -4,9 +4,10 @@
 
 > It builds, not just reads.
 
-Prompt Claude (or any MCP client):
+Prompt CoPilot Studio Agent (or any MCP client):
 
 - *"create a queue called Weekend Support"*
+- *"create a new division and assign agents and users to divisions"*
 - *"build a call flow: greet callers, press 1 for Weekend Support, press 9 to end the call. show me the diagram first"*
 - *"draw my Main IVR as a diagram"*
 - *"onboard prep: create a spanish skill and assign it to Jess at proficiency 4"*
