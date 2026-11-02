@@ -677,52 +677,35 @@ if (a.division) {
     },
   },
   {
+{
   name: 'create_division',
-  description: 'Create a new Genesys Cloud division. Requires a name; description is optional.',
+  description: 'Use this function to create a Genesys Cloud division.',
   inputSchema: {
     type: 'object',
     properties: {
       name: {
         type: 'string',
-        description: 'Name of the new division',
-      },
-      description: {
-        type: 'string',
-        description: 'Optional description of the division',
-      },
+        description: 'Name for the new division'
+      }
     },
     required: ['name'],
-    additionalProperties: false,
+    additionalProperties: false
   },
 
   handler: async (gc, a) => {
-    const name = a.name.trim();
-
-    if (!name) {
-      throw new GenesysError(
-        'Division name is required.',
-        400
-      );
-    }
-
     const division = await gc.post(
       '/api/v2/authorization/divisions',
       {
-        name,
-        ...(a.description
-          ? { description: a.description.trim() }
-          : {}),
+        name: a.name
       }
     );
 
     return {
       created: true,
       id: division.id,
-      name: division.name,
-      description: division.description,
-      homeDivision: division.homeDivision,
+      name: division.name
     };
-  },
+  }
 },
   {
     name: 'list_did_pools',
