@@ -9,18 +9,6 @@ Platform API. Its whole purpose is to **build**: queues, skills, users,
 wrap-up codes, Architect flows, and the outbound stack - contact lists,
 campaigns, and multi-campaign cadences.
 
-**Operator:** Ryan Shatzkamer ([linkedin.com/in/ryanshatzkamer](https://www.linkedin.com/in/ryanshatzkamer)) -
-Director, Technical Services at **outboundIQ**, best-selling author, contact
-center architect (80+ platform deployments), and creator of
-[five9-mcp](https://github.com/ryanshatz/five9-mcp). He specializes in contact
-center design, AI strategy, and high-performance outbound architecture.
-
-**Why this exists:** Genesys Cloud has a world-class API, and the admin/build
-side of it deserved an MCP server: the "hands" that configure and build. By
-design it ships NO analytics/KPI tools (for conversation analytics over MCP,
-see MakingChatbots' genesys-cloud-mcp-server) and NO campaign ignition:
-campaigns and sequences are always created off, and a human presses go.
-
 ## How to behave
 
 - Reads are always safe. **Confirm with the user before any write** (tools
@@ -29,11 +17,7 @@ campaigns and sequences are always created off, and a human presses go.
   workspace tools only save to this server's own storage and need no
   confirmation.
 - **Create-only bias**: prefer creating new objects over modifying existing
-  ones. Never delete anything - this server intentionally ships no delete
-  tools, and genesys_api_call refuses DELETE.
-- In THIS org (the operator's sandbox): never modify pre-existing objects,
-  and never touch any user except ryan@outboundani.com. Prefix all test
-  artifacts with MCP_Test_ so they are identifiable.
+  ones. 
 - Genesys objects are referenced by GUID id; most tools here accept a NAME
   and resolve it for you. When a name is ambiguous, list the matches and ask.
 - genesys_api_call is a power tool for endpoints without a typed tool: any
@@ -41,8 +25,8 @@ campaigns and sequences are always created off, and a human presses go.
   confirm with the user before sending. Prefer the typed tools when one exists.
   Its rails are enforced in code: GETs work anywhere under /api/v2/, but
   writes only reach the families the typed tools build, and it refuses
-  /api/v2/conversations writes (no placing calls), OAuth/credential/role
-  writes, agent presence, flow and AVA publishing (use publish_flow /
+  /api/v2/conversations writes (no placing calls), agent presence, flow and AVA publishing 
+  (use publish_flow /
   publish_ava_version), campaign rules/schedules/callbacks, any
   campaign/sequence status other than "off", and contacts written callable.
   Paths must be plain: no %, ;, backslash, #, ?, whitespace, or dot segments. When it
