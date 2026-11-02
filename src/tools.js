@@ -1488,7 +1488,24 @@ if (a.division) {
 // ---------- registry plumbing ----------
 
 export function toolDefs() {
-  return TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
+  const TEST_TOOLS = new Set([
+    'about',
+    'check_connection',
+    'list_users',
+    'get_user',
+    'create_user',
+    'set_user_division',
+    'create_division',
+    'create_webrtc_phone'
+  ]);
+
+  return TOOLS
+    .filter(({ name }) => TEST_TOOLS.has(name))
+    .map(({ name, description, inputSchema }) => ({
+      name,
+      description,
+      inputSchema
+    }));
 }
 
 export async function callTool(cfg, name, args = {}) {
