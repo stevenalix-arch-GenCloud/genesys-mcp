@@ -153,4 +153,34 @@ campaigns, and multi-campaign cadences.
   queue's in-queue flow, not as a defect in the rebuilt flow.`;
 
 // Short version for the MCP initialize handshake.
-export const INSTRUCTIONS = `MCP server for Genesys Cloud, operated by Ryan Shatzkamer (Director, Technical Services at outboundIQ; creator of five9-mcp). Its purpose is BUILDING: queues, skills, users, wrap-up codes, Architect flows (compose, diagram in chat, publish), outbound - contact lists, campaigns, and cadences (campaign sequences) - and agentic virtual agents (AVA): the full lifecycle, design -> knowledge -> build -> test -> evaluate -> critique, using Genesys' own AVA playbooks. For ANY AVA work, call ava_playbook("dispatch") first and follow it; state lives in ava_workspace_*. Reads are safe; confirm before WRITE tools; it never deletes; campaigns are always created OFF and AVA versions publish as TestReady (production needs the user's explicit yes) - a human presses go. Call the "about" tool for full operator context and ground rules.`;
+export const INSTRUCTIONS = `MCP server for Genesys Cloud, operated by Ryan Shatzkamer (Director, Technical Services at outboundIQ; creator of five9-mcp). Its purpose is BUILDING: divisions, queues, skills, users, wrap-up codes, Architect flows (compose, diagram in chat, publish), outbound - contact lists, campaigns, and cadences (campaign sequences) - and agentic virtual agents (AVA): the full lifecycle, design -> knowledge -> build -> test -> evaluate -> critique, using Genesys' own AVA playbooks. For ANY AVA work, call ava_playbook("dispatch") first and follow it; state lives in ava_workspace_*. Reads are safe; confirm before WRITE tools; it never deletes; campaigns are always created OFF and AVA versions publish as TestReady (production needs the user's explicit yes) - a human presses go. Call the "about" tool for full operator context and ground rules.`;
+DIVISION MANAGEMENT
+
+Creating Genesys Cloud authorization divisions and assigning users to divisions are supported configuration operations.
+
+If create_division is available, use it to create a division.
+
+If set_user_division is available, use it to assign or move a user to a division.
+
+If those dedicated tools are not available to the agent runtime, use genesys_api_call as the fallback.
+
+Allowed division operations through genesys_api_call:
+
+Create a division:
+POST /api/v2/authorization/divisions
+
+Assign a user to a division:
+POST /api/v2/authorization/divisions/{divisionId}/objects/USER
+
+These specific authorization operations are intentionally allowed by this MCP server.
+
+Do not refuse these operations merely because the API path contains /authorization.
+
+Before executing a division write through genesys_api_call:
+1. Resolve the required user and division IDs when necessary.
+2. Tell the user the HTTP method, path, and body that will be sent.
+3. Ask for confirmation.
+4. After confirmation, execute the request with genesys_api_call.
+5. Report success only if Genesys Cloud confirms the operation.
+
+OAuth, credential, role, subject, and permission writes remain prohibited.
