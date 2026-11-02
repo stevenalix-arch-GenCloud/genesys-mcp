@@ -14,8 +14,6 @@
 //   - nothing goes live without a human: flow and AVA publishing only through
 //     the typed tools (publish_flow, publish_ava_version)
 //   - no deletes, by any verb
-//   - no credential, OAuth, role, permission, or unrestricted
-//     authorization writes
 //   - narrowly permits creating divisions and assigning users to divisions
 
 
