@@ -14,7 +14,10 @@
 //   - nothing goes live without a human: flow and AVA publishing only through
 //     the typed tools (publish_flow, publish_ava_version)
 //   - no deletes, by any verb
-//   - no credential, OAuth, or role/authorization writes
+//   - no credential, OAuth, role, permission, or unrestricted
+//     authorization writes
+//   - narrowly permits creating divisions and assigning users to divisions
+
 
 // ---------- path + query normalization ----------
 
@@ -97,6 +100,7 @@ const R = (s) => new RegExp(`^/api/v2/${s.replace(/\{guid\}/g, GUID).replace(/\{
 // Non-GET (method, path) pairs the raw tool may send: the resource families
 // the typed tools build, and nothing else.
 export const WRITE_FAMILIES = [
+  ['authorization divisions', [['POST', 'authorization/divisions'], ['POST', 'authorization/divisions/{guid}/objects/USER']]],
   ['routing/queues', [['POST', 'routing/queues'], ['PUT', 'routing/queues/{id}'], ['POST', 'routing/queues/{id}/wrapupcodes']]],
   ['routing/skills', [['POST', 'routing/skills']]],
   ['routing/wrapupcodes', [['POST', 'routing/wrapupcodes'], ['PUT', 'routing/wrapupcodes/{id}']]],
@@ -123,7 +127,7 @@ export const ALLOWED_WRITE_SUMMARY = WRITE_FAMILIES.map(([name]) => name).join('
 
 const LIVE = /^\/api\/v2\/conversations(\/|$)/i;
 const CREDENTIAL_READS = /^\/api\/v2\/(oauth|tokens|integrations\/credentials|authorization\/(roles|subjects|permissions))(\/|$)/i;
-const CREDENTIALS = /^\/api\/v2\/(oauth|authorization|tokens|integrations\/credentials)(\/|$)/i;
+const CREDENTIALS = /^\/api\/v2\/(oauth|tokens|integrations\/credentials)(\/|$)|^\/api\/v2\/authorization\/(roles|subjects|permissions)(\/|$)/i;
 const AGENT_LIVE = /^\/api\/v2\/users\/[^/]+\/(presence|routingstatus|station)(\/|$)|^\/api\/v2\/(users\/[^/]+\/presences|apps\/[^/]+\/presences|stations)(\/|$)|^\/api\/v2\/presence\//i;
 const FLOW_PUBLISH = /^\/api\/v2\/flows\/(jobs|actions\/(publish|deactivate|revert))(\/|$)/i;
 const AVA_PUBLISH = /^\/api\/v2\/agentic\/virtualagents\/[^/]+\/versions\/[^/]+\/jobs(\/|$)/i;
@@ -152,7 +156,8 @@ export function refusalFor(method, path, body, query) {
   const queryErr = checkQuery(query);
   if (queryErr) return queryErr;
 
-  // Credential and role reads are refused too (matches ringcx-mcp): OAuth clients,
+  // Credential, role, subject, and permission reads are refused.
+  // Division reads remain available through ordinary GET requests. (matches ringcx-mcp): OAuth clients,
   // tokens, and role grants are not contact center config.
   if (m === 'GET' && CREDENTIAL_READS.test(path)) return 'Refused: OAuth clients, tokens, credentials, and authorization/role data are out of scope for the raw tool, reads included. View those in Admin > Integrations / Roles.';
   if (m === 'GET') return null; // reads stay broad once the path is clean; responses are redacted
@@ -164,7 +169,7 @@ export function refusalFor(method, path, body, query) {
 
   // 3. Explicit refusals, most specific message first.
   if (LIVE.test(path)) return 'Refused: /api/v2/conversations is live interaction control (placing, transferring, disconnecting, recording calls and chats). This server never places or touches live calls; a human does that in Genesys Cloud.';
-  if (CREDENTIALS.test(path)) return 'Refused: OAuth, token, credential, and authorization/role writes could mint or escalate access. Manage those in Admin > Integrations / Roles.';
+  if (CREDENTIALS.test(path)) return 'Refused: OAuth, token, credential, role, subject, and permission writes could mint or escalate access. Division creation and user-to-division assignment are permitted only through their specifically allowlisted endpoints.';
   if (AGENT_LIVE.test(path)) return 'Refused: presence, routing status, and station writes put real agents on or off queue. A human does that.';
   if (FLOW_PUBLISH.test(path)) return 'Refused: flows go live only through the typed publish_flow tool (after the user approves the diagram). Deactivating or reverting a flow is a human decision in Architect.';
   if (AVA_PUBLISH.test(path)) return 'Refused: AVA versions publish only through publish_ava_version (TestReady by default; production needs the user\'s explicit yes).';
