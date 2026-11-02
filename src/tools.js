@@ -677,7 +677,6 @@ if (a.division) {
     },
   },
   {
-{
   name: 'create_division',
   description: 'Use this function to create a Genesys Cloud division.',
   inputSchema: {
