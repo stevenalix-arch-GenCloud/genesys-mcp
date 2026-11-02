@@ -677,6 +677,54 @@ if (a.division) {
     },
   },
   {
+  name: 'create_division',
+  description: 'Create a new Genesys Cloud authorization division. Requires a name; description is optional.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      name: {
+        type: 'string',
+        description: 'Name of the new division',
+      },
+      description: {
+        type: 'string',
+        description: 'Optional description of the division',
+      },
+    },
+    required: ['name'],
+    additionalProperties: false,
+  },
+
+  handler: async (gc, a) => {
+    const name = a.name.trim();
+
+    if (!name) {
+      throw new GenesysError(
+        'Division name is required.',
+        400
+      );
+    }
+
+    const division = await gc.post(
+      '/api/v2/authorization/divisions',
+      {
+        name,
+        ...(a.description
+          ? { description: a.description.trim() }
+          : {}),
+      }
+    );
+
+    return {
+      created: true,
+      id: division.id,
+      name: division.name,
+      description: division.description,
+      homeDivision: division.homeDivision,
+    };
+  },
+},
+  {
     name: 'list_did_pools',
     description: 'List DID number pools (phone number ranges available in the org).',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
@@ -1258,7 +1306,7 @@ export async function callTool(cfg, name, args = {}) {
 
 // UI metadata - which tools are writes, and how they group on the landing page.
 export const WRITE_TOOLS = new Set([
-  'create_queue', 'create_user', 'set_user_division', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill',
+  'create_division', 'create_queue', 'create_user', 'set_user_division', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill',
   'create_schedule', 'create_schedule_group',
   'create_contact_list', 'add_contacts', 'create_attempt_limits',
   'create_callable_time_set', 'create_dnc_list', 'create_campaign',
@@ -1268,7 +1316,7 @@ export const WRITE_TOOLS = new Set([
 ]);
 
 export const TOOL_GROUPS = [
-  { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
+  { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'create_division', 'list_did_pools'] },
   { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'update_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
   { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'set_user_division', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill'] },
   { name: 'Schedules & Hours', icon: '🕐', tools: ['list_schedules', 'create_schedule', 'create_schedule_group'] },
