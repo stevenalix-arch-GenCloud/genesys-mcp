@@ -1494,7 +1494,7 @@ export function toolDefs() {
     'list_users',
     'get_user',
     'create_user',
-    'set_user_division',
+    'update_user_division',
     'create_division',
     'create_webrtc_phone'
   ]);
