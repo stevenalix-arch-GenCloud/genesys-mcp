@@ -678,7 +678,7 @@ if (a.division) {
   },
   {
   name: 'create_division',
-  description: 'Create a new Genesys Cloud authorization division. Requires a name; description is optional.',
+  description: 'Create a new Genesys Cloud division. Requires a name; description is optional.',
   inputSchema: {
     type: 'object',
     properties: {
