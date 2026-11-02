@@ -397,8 +397,8 @@ if (a.division) {
   },
 },
  {
-  name: 'set_user_division',
-  description: 'Assign an existing Genesys Cloud user to an authorization division. Use this when a user needs to be moved to or assigned to a specific division.',
+  name: 'update_user_division',
+  description: 'Move an existing Genesys Cloud user to a specified authorization division.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -1306,7 +1306,7 @@ export async function callTool(cfg, name, args = {}) {
 
 // UI metadata - which tools are writes, and how they group on the landing page.
 export const WRITE_TOOLS = new Set([
-  'create_division', 'create_queue', 'create_user', 'set_user_division', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill',
+  'create_division', 'create_queue', 'create_user', 'update_user_division', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill',
   'create_schedule', 'create_schedule_group',
   'create_contact_list', 'add_contacts', 'create_attempt_limits',
   'create_callable_time_set', 'create_dnc_list', 'create_campaign',
@@ -1318,7 +1318,7 @@ export const WRITE_TOOLS = new Set([
 export const TOOL_GROUPS = [
   { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'create_division', 'list_did_pools'] },
   { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'update_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
-  { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'set_user_division', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill'] },
+  { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'update_user_division', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill'] },
   { name: 'Schedules & Hours', icon: '🕐', tools: ['list_schedules', 'create_schedule', 'create_schedule_group'] },
   { name: 'Outbound (Campaigns & Cadences)', icon: '📤', tools: ['list_contact_lists', 'get_contact_list', 'create_contact_list', 'add_contacts', 'create_attempt_limits', 'create_callable_time_set', 'create_dnc_list', 'list_campaigns', 'get_campaign', 'create_campaign', 'create_campaign_sequence', 'list_outbound_assets', 'render_cadence'] },
   { name: 'Flows (Architect)', icon: '🌳', tools: ['list_flows', 'get_flow', 'get_flow_configuration', 'list_prompts', 'render_flow', 'export_flow'] },
