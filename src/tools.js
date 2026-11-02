@@ -344,6 +344,10 @@ export const TOOLS = [
         type: 'string',
         description: 'User email address',
       },
+      division: {
+  type: 'string',
+  description: 'Optional Genesys Cloud division name or id',
+},
     },
     required: ['first_name', 'last_name', 'email'],
     additionalProperties: false,
@@ -365,6 +369,21 @@ export const TOOLS = [
       name: `${firstName} ${lastName}`,
       email,
     });
+    let division;
+
+if (a.division) {
+  division = await resolveOne(
+    gc,
+    'division',
+    '/api/v2/authorization/divisions',
+    a.division
+  );
+
+  await gc.post(
+    `/api/v2/authorization/divisions/${division.id}/objects/USER`,
+    [user.id]
+  );
+}
 
     return {
       created: true,
@@ -372,9 +391,55 @@ export const TOOLS = [
       name: user.name,
       email: user.email,
       state: user.state,
+      division: division?.name,
+      divisionId: division?.id,
     };
   },
 },
+ {
+  name: 'set_user_division',
+  description: 'Assign an existing Genesys Cloud user to an authorization division. Use this when a user needs to be moved to or assigned to a specific division.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      user: {
+        type: 'string',
+        description: 'User name, email, or id',
+      },
+      division: {
+        type: 'string',
+        description: 'Division name or id',
+      },
+    },
+    required: ['user', 'division'],
+    additionalProperties: false,
+  },
+
+  handler: async (gc, a) => {
+    const [user, division] = await Promise.all([
+      resolveUser(gc, a.user),
+      resolveOne(
+        gc,
+        'division',
+        '/api/v2/authorization/divisions',
+        a.division
+      ),
+    ]);
+
+    await gc.post(
+      `/api/v2/authorization/divisions/${division.id}/objects/USER`,
+      [user.id]
+    );
+
+    return {
+      updated: true,
+      user: user.name || user.id,
+      userId: user.id,
+      division: division.name || division.id,
+      divisionId: division.id,
+    };
+  },
+}, 
   {
     name: 'list_skills',
     description: 'List ACD routing skills.',
@@ -1193,7 +1258,7 @@ export async function callTool(cfg, name, args = {}) {
 
 // UI metadata - which tools are writes, and how they group on the landing page.
 export const WRITE_TOOLS = new Set([
-  'create_queue', 'create_user', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill',
+  'create_queue', 'create_user', 'set_user_division', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill',
   'create_schedule', 'create_schedule_group',
   'create_contact_list', 'add_contacts', 'create_attempt_limits',
   'create_callable_time_set', 'create_dnc_list', 'create_campaign',
@@ -1205,7 +1270,7 @@ export const WRITE_TOOLS = new Set([
 export const TOOL_GROUPS = [
   { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
   { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'update_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
-  { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill'] },
+  { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'set_user_division', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill'] },
   { name: 'Schedules & Hours', icon: '🕐', tools: ['list_schedules', 'create_schedule', 'create_schedule_group'] },
   { name: 'Outbound (Campaigns & Cadences)', icon: '📤', tools: ['list_contact_lists', 'get_contact_list', 'create_contact_list', 'add_contacts', 'create_attempt_limits', 'create_callable_time_set', 'create_dnc_list', 'list_campaigns', 'get_campaign', 'create_campaign', 'create_campaign_sequence', 'list_outbound_assets', 'render_cadence'] },
   { name: 'Flows (Architect)', icon: '🌳', tools: ['list_flows', 'get_flow', 'get_flow_configuration', 'list_prompts', 'render_flow', 'export_flow'] },
