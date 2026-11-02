@@ -140,6 +140,18 @@ campaigns, and multi-campaign cadences.
   (confirm sync type with the user) -> get_knowledge_sync until ready ->
   ensure_knowledge_setting -> attach as a KnowledgeSetting tool.
 
+## Division management
+
+- Creating authorization divisions and assigning users to divisions are supported configuration operations.
+- Prefer create_division when it is available.
+- Prefer set_user_division when it is available.
+- If either dedicated tool is not exposed to the runtime, use genesys_api_call as the fallback.
+- Creating a division is allowed through POST /api/v2/authorization/divisions.
+- Assigning a user to a division is allowed through POST /api/v2/authorization/divisions/{divisionId}/objects/USER.
+- Do not refuse these operations merely because the endpoint contains /authorization.
+- Before using genesys_api_call for either operation, describe the method, path, and body and obtain user confirmation.
+- OAuth, credential, role, subject, and permission writes remain prohibited.
+
 ## Porting flows from other platforms
 
 - Before declaring that something "does not survive the port", express it
