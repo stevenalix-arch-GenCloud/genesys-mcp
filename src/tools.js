@@ -641,210 +641,6 @@ if (a.division) {
       return { total: r.total, didPools: r.entities.map((p) => ({ id: p.id, startPhoneNumber: p.startPhoneNumber, endPhoneNumber: p.endPhoneNumber, provider: p.provider })) };
     },
   },
-{
-  name: 'create_webrtc_phone',
-  description: 'Create a Genesys Cloud WebRTC phone for an existing user using an existing WebRTC phone base setting and site. Optionally make the new phone the user default phone.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      user: {
-        type: 'string',
-        description: 'Existing Genesys Cloud user name, email, or id',
-      },
-      phone_base_settings: {
-        type: 'string',
-        description: 'Existing Genesys Cloud WebRTC phone base settings name or id',
-      },
-      site: {
-        type: 'string',
-        description: 'Existing Genesys Cloud telephony site name or id',
-      },
-      phone_name: {
-        type: 'string',
-        description: 'Optional phone name. Defaults to "<user name> WebRTC Phone"',
-      },
-      set_default: {
-        type: 'boolean',
-        description: 'Make this the user default phone. Defaults to true',
-      },
-    },
-    required: ['user', 'phone_base_settings', 'site'],
-    additionalProperties: false,
-  },
-
-  handler: async (gc, a) => {
-    const user = await resolveUser(gc, a.user);
-
-    const [phoneBaseSettings, site] = await Promise.all([
-      resolveOne(
-        gc,
-        'phone base settings',
-        '/api/v2/telephony/providers/edges/phonebasesettings',
-        a.phone_base_settings
-      ),
-      resolveOne(
-        gc,
-        'site',
-        '/api/v2/telephony/providers/edges/sites',
-        a.site
-      ),
-    ]);
-
-    /*
-     * Confirm that the selected base setting is for a Genesys Cloud
-     * WebRTC phone. The full object is retrieved because resolveOne()
-     * may only return the list representation.
-     */
-    const baseDetails = await gc.get(
-      `/api/v2/telephony/providers/edges/phonebasesettings/${phoneBaseSettings.id}`
-    );
-
-    const metaBaseId =
-      baseDetails.phoneMetaBase?.id ||
-      baseDetails.phoneMetaBaseId ||
-      baseDetails.phoneMetabaseId;
-
-    if (
-      metaBaseId &&
-      metaBaseId !== 'inin_webrtc_softphone.json'
-    ) {
-      throw new GenesysError(
-        `Phone base settings "${baseDetails.name}" does not appear to be a Genesys Cloud WebRTC phone base. Its phone metabase is "${metaBaseId}".`,
-        400
-      );
-    }
-
-    const phoneName =
-      a.phone_name?.trim() ||
-      `${user.name || user.email || user.id} WebRTC Phone`;
-
-    /*
-     * Avoid creating a duplicate phone with the same exact name.
-     */
-    const existingPhones = await gc.listAll(
-      '/api/v2/telephony/providers/edges/phones',
-      { name: phoneName },
-      { max: 50 }
-    );
-
-    const duplicate = existingPhones.entities.find(
-      (phone) =>
-        phone.name?.toLowerCase() === phoneName.toLowerCase()
-    );
-
-    if (duplicate) {
-      throw new GenesysError(
-        `A phone named "${phoneName}" already exists with id ${duplicate.id}. Choose a different phone_name.`,
-        409
-      );
-    }
-
-    /*
-     * Create the WebRTC phone using the existing base setting.
-     * For a WebRTC phone, webRtcUser associates the phone with
-     * the specified Genesys Cloud user.
-     */
-    const phone = await gc.post(
-      '/api/v2/telephony/providers/edges/phones',
-      {
-        name: phoneName,
-        state: 'active',
-        site: {
-          id: site.id,
-        },
-        phoneBaseSettings: {
-          id: phoneBaseSettings.id,
-        },
-        webRtcUser: {
-          id: user.id,
-        },
-      }
-    );
-
-    let station = null;
-    let defaultPhoneSet = false;
-    let defaultPhoneMessage = null;
-
-    /*
-     * Creating the phone associates it with the user, but Genesys
-     * does not always automatically select it as the user's default
-     * station. Find the resulting station and set it as default.
-     */
-    if (a.set_default !== false) {
-      for (let attempt = 0; attempt < 5; attempt++) {
-        const stations = await gc.get(
-          '/api/v2/stations',
-          {
-            name: phoneName,
-            pageSize: 25,
-          }
-        );
-
-        const stationEntities =
-          stations.entities ||
-          stations.results ||
-          [];
-
-        station = stationEntities.find(
-          (item) =>
-            item.name?.toLowerCase() === phoneName.toLowerCase()
-        );
-
-        if (station) {
-          break;
-        }
-
-        await new Promise((resolve) =>
-          setTimeout(resolve, 1500)
-        );
-      }
-
-      if (station) {
-        await gc.api(
-          'PUT',
-          `/api/v2/users/${user.id}/station/defaultstation/${station.id}`
-        );
-
-        defaultPhoneSet = true;
-        defaultPhoneMessage =
-          'The new WebRTC phone was selected as the user default phone.';
-      } else {
-        defaultPhoneMessage =
-          'The WebRTC phone was created, but its station was not available yet. The user default phone was not changed.';
-      }
-    }
-
-    return {
-      created: true,
-      phone: {
-        id: phone.id,
-        name: phone.name || phoneName,
-        state: phone.state || 'active',
-      },
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-      },
-      phoneBaseSettings: {
-        id: phoneBaseSettings.id,
-        name: phoneBaseSettings.name || baseDetails.name,
-      },
-      site: {
-        id: site.id,
-        name: site.name,
-      },
-      station: station
-        ? {
-            id: station.id,
-            name: station.name,
-          }
-        : null,
-      defaultPhoneSet,
-      defaultPhoneMessage,
-    };
-  },
-},
   // ----- outbound (lists, campaigns, cadences) -----
   {
     name: 'list_contact_lists',
@@ -1422,7 +1218,7 @@ export async function callTool(cfg, name, args = {}) {
 // UI metadata - which tools are writes, and how they group on the landing page.
 export const WRITE_TOOLS = new Set([
   'create_queue', 'create_user', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill',
-  'create_schedule', 'create_schedule_group', 'create_webrtc_phone',
+  'create_schedule', 'create_schedule_group',
   'create_contact_list', 'add_contacts', 'create_attempt_limits',
   'create_callable_time_set', 'create_dnc_list', 'create_campaign',
   'create_campaign_sequence',
@@ -1431,7 +1227,7 @@ export const WRITE_TOOLS = new Set([
 ]);
 
 export const TOOL_GROUPS = [
-  { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'create_webrtc_phone', 'list_did_pools'] },
+  { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
   { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'update_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
   { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill'] },
   { name: 'Schedules & Hours', icon: '🕐', tools: ['list_schedules', 'create_schedule', 'create_schedule_group'] },
