@@ -1449,7 +1449,18 @@ if (a.division) {
         method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH'] },
         path: { type: 'string', description: 'API path starting with /api/v2/, e.g. /api/v2/routing/queues' },
         query: { type: 'object', description: 'Query string parameters', additionalProperties: true },
-        body: { type: 'object', description: 'JSON body for POST/PUT/PATCH', additionalProperties: true },
+        body: { description: 'JSON body for POST/PUT/PATCH. May be a JSON object or array depending on the Genesys Cloud endpoint.',
+  oneOf: [
+    {
+      type: 'object',
+      additionalProperties: true
+    },
+    {
+      type: 'array',
+      items: {}
+    }
+  ]
+},
       },
       required: ['method', 'path'],
       additionalProperties: false,
