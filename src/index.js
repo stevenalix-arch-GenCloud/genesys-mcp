@@ -53,10 +53,10 @@ async function route(request, env) {
       return json(rpcError(null, -32700, 'Parse error: body must be JSON'), 400);
     }
     if (Array.isArray(body)) {
-      const results = (await Promise.all(body.map((m) => handleMessage(m, cfg)))).filter(Boolean);
+      const results = (await Promise.all(body.map((m) => handleMessage(m, env)))).filter(Boolean);
       return results.length ? json(results) : new Response(null, { status: 202 });
     }
-    const result = await handleMessage(body, cfg);
+    const result = await handleMessage(body, env);
     return result ? json(result) : new Response(null, { status: 202 });
   }
 
@@ -113,7 +113,7 @@ async function handleSetup(request, env, cfg) {
   });
 }
 
-async function handleMessage(msg, cfg) {
+async function handleMessage(msg, env) {
   if (!msg || typeof msg !== 'object' || msg.jsonrpc !== '2.0') {
     return rpcError(msg?.id ?? null, -32600, 'Invalid JSON-RPC 2.0 request');
   }
@@ -143,20 +143,53 @@ async function handleMessage(msg, cfg) {
         const p = AVA_PROMPTS.find((x) => x.name === params?.name);
         if (!p) return rpcError(id, -32602, `Unknown prompt: ${params?.name}`);
         return rpcResult(id, { description: p.description, messages: [{ role: 'user', content: { type: 'text', text: p.text } }] });
-      }
       case 'tools/call': {
-        const name = params?.name;
-        try {
-          const result = await callTool(cfg, name, params?.arguments);
-          const text = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-          return rpcResult(id, { content: [{ type: 'text', text }], isError: false });
-        } catch (e) {
-          if (e instanceof GenesysError || e.message?.startsWith('Unknown tool')) {
-            return rpcResult(id, { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true });
-          }
-          throw e;
-        }
-      }
+  const name = params?.name;
+  const args = params?.arguments || {};
+
+  try {
+    // Select the Genesys Cloud organization for THIS tool call.
+    // Existing calls without an org continue to use DEV.
+    const requestedOrg = args.org || 'dev';
+
+    // Load credentials for only the selected organization.
+    const toolCfg = await loadConfig(env, requestedOrg);
+
+    // Run the tool using that organization's Genesys configuration.
+    const result = await callTool(toolCfg, name, args);
+
+    const response = {
+      orgId: toolCfg.orgId,
+      orgLabel: toolCfg.orgLabel,
+      result,
+    };
+
+    const text =
+      typeof result === 'string'
+        ? `[${toolCfg.orgLabel}] ${result}`
+        : JSON.stringify(response, null, 2);
+
+    return rpcResult(id, {
+      content: [{ type: 'text', text }],
+      isError: false,
+    });
+  } catch (e) {
+    if (
+      e instanceof GenesysError ||
+      e.message?.startsWith('Unknown tool') ||
+      e.message?.startsWith('Unknown Genesys Cloud org') ||
+      e.message?.startsWith('Genesys Cloud credentials') ||
+      e.message?.startsWith('Unable to read KV configuration')
+    ) {
+      return rpcResult(id, {
+        content: [{ type: 'text', text: `Error: ${e.message}` }],
+        isError: true,
+      });
+    }
+
+    throw e;
+  }
+}
       default:
         return rpcError(id, -32601, `Method not found: ${method}`);
     }
