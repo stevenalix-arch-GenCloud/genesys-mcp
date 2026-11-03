@@ -1,35 +1,119 @@
-// Configuration resolution. Two sources, env wins:
-//   1. Wrangler secrets / vars (GENESYS_CLIENT_ID, GENESYS_CLIENT_SECRET,
-//      GENESYS_REGION, MCP_AUTH_TOKEN)
-//   2. The KV-stored config written by the in-browser setup wizard (/setup)
+// Configuration resolution for multiple Genesys Cloud organizations.
+//
+// KV configurations:
+//   1. genesys-config          = Development organization
+//   2. genesys-config-edcisbu  = EDCiSBU organization
+//
+// MCP_AUTH_TOKEN remains a shared Wrangler secret when configured.
 
 const KV_KEY = 'genesys-config';
+const KV_KEY_EDCiSBU = 'genesys-config-edcisbu';
 
-export async function loadConfig(env) {
-  let stored = null;
-  if (env.CONFIG) {
-    try { stored = await env.CONFIG.get(KV_KEY, 'json'); } catch { /* KV unavailable */ }
+const ORG_CONFIGS = Object.freeze({
+  dev: {
+    key: KV_KEY,
+    label: 'Development',
+  },
+  edcisbu: {
+    key: KV_KEY_EDCiSBU,
+    label: 'EDCiSBU',
+  },
+});
+
+/**
+ * Returns the Genesys Cloud organizations configured in this MCP.
+ */
+export function listConfiguredOrgs() {
+  return Object.entries(ORG_CONFIGS).map(([id, org]) => ({
+    id,
+    label: org.label,
+  }));
+}
+
+/**
+ * Normalizes the organization supplied by an MCP tool or API request.
+ *
+ * Supported examples:
+ *   dev
+ *   development
+ *   edcisbu
+ *   EDCiSBU
+ */
+function normalizeOrgId(orgId) {
+  const value = String(orgId || 'dev')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+
+  if (value === 'dev' || value === 'development') {
+    return 'dev';
   }
-  const envManaged = Boolean(env.GENESYS_CLIENT_ID || env.GENESYS_CLIENT_SECRET);
+
+  if (value === 'edcisbu') {
+    return 'edcisbu';
+  }
+
+  throw new Error(
+    `Unknown Genesys Cloud org "${orgId}". Valid orgs are "dev" and "edcisbu".`
+  );
+}
+
+/**
+ * Loads the configuration for one Genesys Cloud organization.
+ *
+ * Existing calls to loadConfig(env) continue to use DEV.
+ * New calls can use loadConfig(env, 'edcisbu').
+ */
+export async function loadConfig(env, orgId = 'dev') {
+  const normalizedOrgId = normalizeOrgId(orgId);
+  const selectedOrg = ORG_CONFIGS[normalizedOrgId];
+
+  let stored = null;
+
+  if (env.CONFIG) {
+    try {
+      stored = await env.CONFIG.get(selectedOrg.key, 'json');
+    } catch {
+      throw new Error(
+        `Unable to read KV configuration "${selectedOrg.key}" for the ${selectedOrg.label} org.`
+      );
+    }
+  }
+
+  /*
+   * Legacy environment credentials apply only to DEV.
+   * This prevents one global environment credential from overriding
+   * the separate EDCiSBU KV credentials.
+   */
+  const envManaged =
+    normalizedOrgId === 'dev' &&
+    Boolean(env.GENESYS_CLIENT_ID || env.GENESYS_CLIENT_SECRET);
+
   const cfg = {
-    clientId: env.GENESYS_CLIENT_ID || stored?.clientId || '',
-    clientSecret: env.GENESYS_CLIENT_SECRET || stored?.clientSecret || '',
-    region: (envManaged ? env.GENESYS_REGION : stored?.region) || env.GENESYS_REGION || 'mypurecloud.com',
+    orgId: normalizedOrgId,
+    orgLabel: selectedOrg.label,
+    configKey: selectedOrg.key,
+
+    clientId: envManaged
+      ? env.GENESYS_CLIENT_ID || ''
+      : stored?.clientId || '',
+
+    clientSecret: envManaged
+      ? env.GENESYS_CLIENT_SECRET || ''
+      : stored?.clientSecret || '',
+
+    region:
+      (envManaged ? env.GENESYS_REGION : stored?.region) ||
+      'mypurecloud.com',
+
+    /*
+     * MCP_AUTH_TOKEN protects the MCP itself and can be shared.
+     * If it is not a Wrangler secret, the selected KV token is used.
+     */
     authToken: env.MCP_AUTH_TOKEN || stored?.authToken || '',
-    source: envManaged ? 'env' : (stored ? 'kv' : 'none'),
+
+    source: envManaged ? 'env' : stored ? 'kv' : 'none',
     hasKv: Boolean(env.CONFIG),
-    // The same namespace also stores AVA lifecycle artifacts (ava:* keys).
-    kv: env.CONFIG || null,
-  };
-  cfg.configured = Boolean(cfg.clientId && cfg.clientSecret);
-  return cfg;
-}
 
-export async function saveConfig(env, { clientId, clientSecret, region, authToken }) {
-  await env.CONFIG.put(KV_KEY, JSON.stringify({ clientId, clientSecret, region, authToken }));
-}
-
-export function randomToken() {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
+    // The same namespace also stores AVA lifecycle artifacts.
+    kv: env.
