@@ -102,6 +102,7 @@ export const WRITE_FAMILIES = [
   ['routing/queues', [['POST', 'routing/queues'], ['PUT', 'routing/queues/{id}'], ['POST', 'routing/queues/{id}/wrapupcodes']]],
   ['routing/skills', [['POST', 'routing/skills']]],
   ['routing/wrapupcodes', [['POST', 'routing/wrapupcodes'], ['PUT', 'routing/wrapupcodes/{id}']]],
+  ['telephony WebRTC phones', [['POST', 'telephony/providers/edges/phones']]],
   ['users search + user routing skills', [['POST', 'users/search'], ['POST', 'users/{guid}/routingskills'], ['PUT', 'users/{guid}/routingskills/{guid}'], ['PATCH', 'users/{guid}/routingskills/bulk']]], // PUT bulk replaces the set (removes skills): not listed
   ['architect/schedules + schedulegroups', [['POST', 'architect/schedules'], ['PUT', 'architect/schedules/{id}'], ['POST', 'architect/schedulegroups'], ['PUT', 'architect/schedulegroups/{id}']]],
   ['flows (create, edit, checkout/checkin/unlock, export; publish only via publish_flow)', [['POST', 'flows'], ['PUT', 'flows/{id}'], ['POST', 'flows/actions/checkout'], ['POST', 'flows/actions/checkin'], ['POST', 'flows/actions/unlock'], ['POST', 'flows/export/jobs']]],
