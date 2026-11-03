@@ -180,7 +180,6 @@ async function handleMessage(msg, env) {
         isError: true,
       });
     }
-
     throw e;
   }
 }
