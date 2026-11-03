@@ -143,31 +143,25 @@ async function handleMessage(msg, env) {
         const p = AVA_PROMPTS.find((x) => x.name === params?.name);
         if (!p) return rpcError(id, -32602, `Unknown prompt: ${params?.name}`);
         return rpcResult(id, { description: p.description, messages: [{ role: 'user', content: { type: 'text', text: p.text } }] });
+      }
       case 'tools/call': {
   const name = params?.name;
   const args = params?.arguments || {};
 
   try {
-    // Select the Genesys Cloud organization for THIS tool call.
-    // Existing calls without an org continue to use DEV.
     const requestedOrg = args.org || 'dev';
-
-    // Load credentials for only the selected organization.
     const toolCfg = await loadConfig(env, requestedOrg);
 
-    // Run the tool using that organization's Genesys configuration.
     const result = await callTool(toolCfg, name, args);
-
-    const response = {
-      orgId: toolCfg.orgId,
-      orgLabel: toolCfg.orgLabel,
-      result,
-    };
 
     const text =
       typeof result === 'string'
         ? `[${toolCfg.orgLabel}] ${result}`
-        : JSON.stringify(response, null, 2);
+        : JSON.stringify({
+            orgId: toolCfg.orgId,
+            orgLabel: toolCfg.orgLabel,
+            result,
+          }, null, 2);
 
     return rpcResult(id, {
       content: [{ type: 'text', text }],
