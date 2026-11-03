@@ -1192,11 +1192,34 @@ if (a.division) {
 // ---------- registry plumbing ----------
 
 export function toolDefs() {
-  return TOOLS.map(({ name, description, inputSchema }) => ({
-    name,
-    description,
-    inputSchema
-  }));
+  return TOOLS.map(({ name, description, inputSchema, genesys }) => {
+    // Tools that do not connect to Genesys Cloud do not need an org selector.
+    if (genesys === false) {
+      return {
+        name,
+        description,
+        inputSchema
+      };
+    }
+
+    // Add the Genesys Cloud organization selector to every Genesys tool.
+    return {
+      name,
+      description,
+      inputSchema: {
+        ...inputSchema,
+        properties: {
+          org: {
+            type: 'string',
+            enum: ['dev', 'edcisbu'],
+            description:
+              'Genesys Cloud organization to use. Use "dev" for Development or "edcisbu" for EDCiSBU.'
+          },
+          ...(inputSchema?.properties || {})
+        }
+      }
+    };
+  });
 }
 
 export async function callTool(cfg, name, args = {}) {
