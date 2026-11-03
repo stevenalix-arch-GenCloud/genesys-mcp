@@ -116,4 +116,47 @@ export async function loadConfig(env, orgId = 'dev') {
     hasKv: Boolean(env.CONFIG),
 
     // The same namespace also stores AVA lifecycle artifacts.
-    kv: env.
+        kv: env.CONFIG || null,
+  };
+
+  cfg.configured = Boolean(cfg.clientId && cfg.clientSecret);
+
+  if (!cfg.configured) {
+    throw new Error(
+      `Genesys Cloud credentials are missing or incomplete for the ${selectedOrg.label} org. Expected KV key: "${selectedOrg.key}".`
+    );
+  }
+
+  return cfg;
+}
+
+export async function saveConfig(
+  env,
+  { clientId, clientSecret, region, authToken },
+  orgId = 'dev'
+) {
+  const normalizedOrgId = normalizeOrgId(orgId);
+  const selectedOrg = ORG_CONFIGS[normalizedOrgId];
+
+  if (!env.CONFIG) {
+    throw new Error('The CONFIG KV namespace binding is unavailable.');
+  }
+
+  await env.CONFIG.put(
+    selectedOrg.key,
+    JSON.stringify({
+      clientId,
+      clientSecret,
+      region,
+      authToken,
+    })
+  );
+}
+
+export function randomToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+
+  return [...bytes]
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
