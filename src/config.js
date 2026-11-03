@@ -19,7 +19,6 @@ const ORG_CONFIGS = Object.freeze({
     label: 'EDCiSBU',
   },
 });
-
 /**
  * Returns the Genesys Cloud organizations configured in this MCP.
  */
