@@ -1221,21 +1221,46 @@ export function toolDefs() {
     };
   });
 }
-
 export async function callTool(cfg, name, args = {}) {
   const tool = TOOLS.find((t) => t.name === name);
-  if (!tool) throw new GenesysError(`Unknown tool: ${name}`, 404);
-  // Arguments must be an object (absent or null means none), never an array or a scalar.
-  if (args === undefined || args === null) args = {};
-  if (typeof args !== 'object' || Array.isArray(args)) throw new GenesysError('Tool arguments must be a JSON object.', 400);
-  // Handlers get (client, args, ctx); ctx is the resolved config, which also
-  // carries the KV binding the AVA workspace persists to.
-  if (tool.genesys === false) return tool.handler(null, args, cfg);
-  if (!cfg.configured) {
-    throw new GenesysError('This server is not connected to Genesys Cloud yet - open /setup, or set the GENESYS_CLIENT_ID / GENESYS_CLIENT_SECRET / GENESYS_REGION secrets.', 503);
+
+  if (!tool) {
+    throw new GenesysError(`Unknown tool: ${name}`, 404);
   }
+
+  // Arguments must be an object.
+  if (args === undefined || args === null) {
+    args = {};
+  }
+
+  if (typeof args !== 'object' || Array.isArray(args)) {
+    throw new GenesysError(
+      'Tool arguments must be a JSON object.',
+      400
+    );
+  }
+
+  /*
+   * index.js already used args.org to select the correct
+   * configuration. Remove org before passing the remaining
+   * arguments to the individual tool handler.
+   */
+  const { org: _selectedOrg, ...toolArgs } = args;
+
+  if (tool.genesys === false) {
+    return tool.handler(null, toolArgs, cfg);
+  }
+
+  if (!cfg.configured) {
+    throw new GenesysError(
+      'This server is not connected to Genesys Cloud yet - open /setup, or set the GENESYS_CLIENT_ID / GENESYS_CLIENT_SECRET / GENESYS_REGION secrets.',
+      503
+    );
+  }
+
   const gc = new GenesysClient(cfg);
-  return tool.handler(gc, args, cfg);
+
+  return tool.handler(gc, toolArgs, cfg);
 }
 
 // UI metadata - which tools are writes, and how they group on the landing page.
