@@ -42,7 +42,8 @@ async function route(request, env) {
   if (request.method === 'GET' && path === '/setup') return html(setupPage(cfg));
   if (request.method === 'POST' && path === '/setup') return handleSetup(request, env, cfg);
   if (request.method === 'GET' && path === '/health') return json({ ok: true, server: SERVER_INFO, configured: cfg.configured });
-
+  if (request.method === 'GET' && path === '/debug/tools') {return json({server: SERVER_INFO, tools: toolDefs() });
+}
   if (path === '/' || path === '/mcp') {
     if (request.method !== 'POST') {
       return json({ error: 'MCP requests must be POSTed to /mcp' }, 405);
