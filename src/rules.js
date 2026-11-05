@@ -14,7 +14,8 @@
 //   - nothing goes live without a human: flow and AVA publishing only through
 //     the typed tools (publish_flow, publish_ava_version)
 //   - no deletes, by any verb
-//   - narrowly permits creating divisions and assigning users to divisions
+//   - narrowly permits creating divisions, assigning users to divisions,
+//     and updating a specific user's phone numbers for Direct Routing
 
 
 // ---------- path + query normalization ----------
@@ -103,7 +104,7 @@ export const WRITE_FAMILIES = [
   ['routing/skills', [['POST', 'routing/skills']]],
   ['routing/wrapupcodes', [['POST', 'routing/wrapupcodes'], ['PUT', 'routing/wrapupcodes/{id}']]],
   ['telephony WebRTC phones', [['POST', 'telephony/providers/edges/phones']]],
-  ['users search + user routing skills', [['POST', 'users/search'], ['POST', 'users/{guid}/routingskills'], ['PUT', 'users/{guid}/routingskills/{guid}'], ['PATCH', 'users/{guid}/routingskills/bulk']]], // PUT bulk replaces the set (removes skills): not listed
+  ['users search + phone numbers + user routing skills', [['POST', 'users/search'], ['PUT', 'users/{guid}'], ['POST', 'users/{guid}/routingskills'], ['PUT', 'users/{guid}/routingskills/{guid}'], ['PATCH', 'users/{guid}/routingskills/bulk']]], // PUT /users/{guid} permits user phone-number updates; routing-skills bulk PUT remains excluded because it replaces the full set
   ['architect/schedules + schedulegroups', [['POST', 'architect/schedules'], ['PUT', 'architect/schedules/{id}'], ['POST', 'architect/schedulegroups'], ['PUT', 'architect/schedulegroups/{id}']]],
   ['flows (create, edit, checkout/checkin/unlock, export; publish only via publish_flow)', [['POST', 'flows'], ['PUT', 'flows/{id}'], ['POST', 'flows/actions/checkout'], ['POST', 'flows/actions/checkin'], ['POST', 'flows/actions/unlock'], ['POST', 'flows/export/jobs']]],
   ['outbound contactlists + contacts', [['POST', 'outbound/contactlists'], ['PUT', 'outbound/contactlists/{id}'], ['POST', 'outbound/contactlists/{id}/contacts'], ['PUT', 'outbound/contactlists/{id}/contacts/{id}']]],
