@@ -442,6 +442,197 @@ if (a.division) {
     },
   },
   {
+  name: 'set_user_direct_routing_tag',
+  description: 'Add or remove the Genesys Cloud directrouting integration tag on one existing user phone, SMS, or email address. Use this tool whenever a user address must be enabled or disabled for direct routing. The tool preserves all existing user addresses and enforces only one directrouting tag per media type.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      user: {
+        type: 'string',
+        description: 'User name, email, or id',
+      },
+      media_type: {
+        type: 'string',
+        enum: ['PHONE', 'SMS', 'EMAIL'],
+        description: 'Media type of the address being tagged',
+      },
+      address: {
+        type: 'string',
+        description: 'Exact phone number, SMS number, or email address to update',
+      },
+      action: {
+        type: 'string',
+        enum: ['add', 'remove'],
+        description: 'Add or remove the directrouting integration tag. Defaults to add.',
+      },
+    },
+    required: ['user', 'media_type', 'address'],
+    additionalProperties: false,
+  },
+
+  handler: async (gc, a) => {
+    const userRef = await resolveUser(gc, a.user);
+    const userId = pathId('user id', userRef.id);
+
+    const mediaType = String(a.media_type).trim().toUpperCase();
+    const targetAddress = String(a.address).trim();
+    const action = a.action || 'add';
+
+    if (!targetAddress) {
+      throw new GenesysError('address is required.', 400);
+    }
+
+    const currentUser = await gc.get(`/api/v2/users/${userId}`);
+    const addresses = Array.isArray(currentUser.addresses)
+      ? currentUser.addresses.map((address) => ({ ...address }))
+      : [];
+
+    if (!addresses.length) {
+      throw new GenesysError(
+        `User "${currentUser.name || userRef.name || userId}" has no addresses to update.`,
+        404
+      );
+    }
+
+    const normalizedTarget = targetAddress.toLowerCase();
+
+    const matches = addresses.filter((address) => {
+      if (String(address.mediaType || '').toUpperCase() !== mediaType) {
+        return false;
+      }
+
+      const values = [
+        address.address,
+        address.display,
+        address.extension,
+      ]
+        .filter((value) => value !== undefined && value !== null)
+        .map((value) => String(value).trim().toLowerCase());
+
+      return values.includes(normalizedTarget);
+    });
+
+    if (!matches.length) {
+      const available = addresses
+        .filter(
+          (address) =>
+            String(address.mediaType || '').toUpperCase() === mediaType
+        )
+        .map(
+          (address) =>
+            `${address.type || 'unknown'}: ${
+              address.address ||
+              address.display ||
+              address.extension ||
+              'no value'
+            }`
+        );
+
+      throw new GenesysError(
+        `No ${mediaType} address exactly matching "${targetAddress}" was found for ${
+          currentUser.name || userId
+        }. Available ${mediaType} addresses: ${
+          available.length ? available.join(', ') : 'none'
+        }.`,
+        404
+      );
+    }
+
+    if (matches.length > 1) {
+      throw new GenesysError(
+        `More than one ${mediaType} address matched "${targetAddress}". Use an exact unique address.`,
+        409
+      );
+    }
+
+    const target = matches[0];
+
+    const updatedAddresses = addresses.map((address) => {
+      const isSameMedia =
+        String(address.mediaType || '').toUpperCase() === mediaType;
+
+      const isTarget = address === target;
+
+      if (action === 'add' && isSameMedia) {
+        if (isTarget) {
+          return {
+            ...address,
+            integration: 'directrouting',
+          };
+        }
+
+        if (
+          String(address.integration || '').toLowerCase() ===
+          'directrouting'
+        ) {
+          const copy = { ...address };
+          delete copy.integration;
+          return copy;
+        }
+      }
+
+      if (
+        action === 'remove' &&
+        isTarget &&
+        String(address.integration || '').toLowerCase() ===
+          'directrouting'
+      ) {
+        const copy = { ...address };
+        delete copy.integration;
+        return copy;
+      }
+
+      return address;
+    });
+
+    const updatedUser = await gc.patch(
+      `/api/v2/users/${userId}`,
+      {
+        version: currentUser.version,
+        addresses: updatedAddresses,
+      }
+    );
+
+    const updatedTarget = (updatedUser.addresses || updatedAddresses).find(
+      (address) => {
+        if (
+          String(address.mediaType || '').toUpperCase() !== mediaType
+        ) {
+          return false;
+        }
+
+        return [
+          address.address,
+          address.display,
+          address.extension,
+        ]
+          .filter((value) => value !== undefined && value !== null)
+          .map((value) => String(value).trim().toLowerCase())
+          .includes(normalizedTarget);
+      }
+    );
+
+    return {
+      updated: true,
+      action,
+      user: updatedUser.name || currentUser.name || userRef.name || userId,
+      userId,
+      mediaType,
+      address:
+        updatedTarget?.address ||
+        updatedTarget?.display ||
+        updatedTarget?.extension ||
+        targetAddress,
+      addressType: updatedTarget?.type || target.type,
+      integration: updatedTarget?.integration || null,
+      note:
+        action === 'add'
+          ? `The directrouting tag was assigned to the selected ${mediaType} address. Any previous directrouting tag on another ${mediaType} address was removed.`
+          : `The directrouting tag was removed from the selected ${mediaType} address.`,
+    };
+  },
+},
+  {
   name: 'remove_user_skill',
   description: 'Remove a routing skill from a user. Removes only the specified skill and leaves all other skills unchanged.',
   inputSchema: {
@@ -1265,7 +1456,7 @@ export async function callTool(cfg, name, args = {}) {
 
 // UI metadata - which tools are writes, and how they group on the landing page.
 export const WRITE_TOOLS = new Set([
-  'create_queue', 'create_user', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill',
+  'create_queue', 'create_user', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'set_user_direct_routing_tag',
   'create_schedule', 'create_schedule_group',
   'create_contact_list', 'add_contacts', 'create_attempt_limits',
   'create_callable_time_set', 'create_dnc_list', 'create_campaign',
@@ -1277,7 +1468,7 @@ export const WRITE_TOOLS = new Set([
 export const TOOL_GROUPS = [
   { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
   { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'update_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
-  { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill'] },
+  { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'set_user_direct_routing_tag'] },
   { name: 'Schedules & Hours', icon: '🕐', tools: ['list_schedules', 'create_schedule', 'create_schedule_group'] },
   { name: 'Outbound (Campaigns & Cadences)', icon: '📤', tools: ['list_contact_lists', 'get_contact_list', 'create_contact_list', 'add_contacts', 'create_attempt_limits', 'create_callable_time_set', 'create_dnc_list', 'list_campaigns', 'get_campaign', 'create_campaign', 'create_campaign_sequence', 'list_outbound_assets', 'render_cadence'] },
   { name: 'Flows (Architect)', icon: '🌳', tools: ['list_flows', 'get_flow', 'get_flow_configuration', 'list_prompts', 'render_flow', 'export_flow'] },
