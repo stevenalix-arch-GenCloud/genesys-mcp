@@ -442,6 +442,230 @@ if (a.division) {
     },
   },
   {
+  name: 'update_user_contact_options',
+  description: 'Add or update a Genesys Cloud user phone number for Voice, SMS, or both. Preserves all other user addresses. Can optionally apply the directrouting integration tag.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      user: {
+        type: 'string',
+        description: 'User name, email, or id',
+      },
+      phone_number: {
+        type: 'string',
+        description: 'Phone number in E.164 format, for example +15185551212',
+      },
+      address_type: {
+        type: 'string',
+        enum: ['WORK', 'WORK2', 'WORK3', 'WORK4', 'MOBILE'],
+        description: 'Contact-information slot for the number',
+      },
+      enable_voice: {
+        type: 'boolean',
+        description: 'Add or update this number as a Voice address',
+      },
+      accept_sms: {
+        type: 'boolean',
+        description: 'Add or update this number as an SMS address',
+      },
+      country_code: {
+        type: 'string',
+        description: 'Optional two-letter country code, for example US',
+      },
+      direct_routing_voice: {
+        type: 'boolean',
+        description: 'Apply the directrouting integration tag to the Voice address',
+      },
+      direct_routing_sms: {
+        type: 'boolean',
+        description: 'Apply the directrouting integration tag to the SMS address',
+      },
+    },
+    required: ['user', 'phone_number', 'address_type'],
+    additionalProperties: false,
+  },
+
+  handler: async (gc, a) => {
+    const userRef = await resolveUser(gc, a.user);
+    const userId = pathId('user id', userRef.id);
+
+    const phoneNumber = String(a.phone_number).trim();
+    const addressType = String(a.address_type).trim().toUpperCase();
+    const enableVoice = a.enable_voice !== false;
+    const acceptSms = a.accept_sms === true;
+
+    if (!phoneNumber) {
+      throw new GenesysError(
+        'phone_number is required.',
+        400
+      );
+    }
+
+    if (!phoneNumber.startsWith('+')) {
+      throw new GenesysError(
+        'Use an E.164 phone number beginning with + and the country code, for example +15185551212.',
+        400
+      );
+    }
+
+    if (!enableVoice && !acceptSms) {
+      throw new GenesysError(
+        'At least one of enable_voice or accept_sms must be true.',
+        400
+      );
+    }
+
+    const allowedTypes = [
+      'WORK',
+      'WORK2',
+      'WORK3',
+      'WORK4',
+      'MOBILE',
+    ];
+
+    if (!allowedTypes.includes(addressType)) {
+      throw new GenesysError(
+        `address_type must be one of: ${allowedTypes.join(', ')}.`,
+        400
+      );
+    }
+
+    const currentUser = await gc.get(
+      `/api/v2/users/${userId}`
+    );
+
+    const addresses = Array.isArray(currentUser.addresses)
+      ? currentUser.addresses.map((address) => ({ ...address }))
+      : [];
+
+    const countryCode = a.country_code
+      ? String(a.country_code).trim().toUpperCase()
+      : undefined;
+
+    function buildAddress(mediaType, directRouting) {
+      return {
+        address: phoneNumber,
+        display: phoneNumber,
+        mediaType,
+        type: addressType,
+        ...(countryCode
+          ? { countryCode }
+          : {}),
+        ...(directRouting
+          ? { integration: 'directrouting' }
+          : {}),
+      };
+    }
+
+    function upsertAddress(mediaType, directRouting) {
+      let found = false;
+
+      const updated = addresses.map((address) => {
+        const sameSlot =
+          String(address.mediaType || '').toUpperCase() === mediaType &&
+          String(address.type || '').toUpperCase() === addressType;
+
+        if (sameSlot) {
+          found = true;
+
+          return {
+            ...address,
+            ...buildAddress(mediaType, directRouting),
+          };
+        }
+
+        if (
+          directRouting &&
+          String(address.mediaType || '').toUpperCase() === mediaType &&
+          String(address.integration || '').toLowerCase() ===
+            'directrouting'
+        ) {
+          const copy = { ...address };
+          delete copy.integration;
+          return copy;
+        }
+
+        return address;
+      });
+
+      if (!found) {
+        updated.push(
+          buildAddress(mediaType, directRouting)
+        );
+      }
+
+      addresses.length = 0;
+      addresses.push(...updated);
+    }
+
+    if (enableVoice) {
+      upsertAddress(
+        'PHONE',
+        a.direct_routing_voice === true
+      );
+    }
+
+    if (acceptSms) {
+      upsertAddress(
+        'SMS',
+        a.direct_routing_sms === true
+      );
+    }
+
+    const updatedUser = await gc.patch(
+      `/api/v2/users/${userId}`,
+      {
+        version: currentUser.version,
+        addresses,
+      }
+    );
+
+    const savedAddresses =
+      updatedUser.addresses || addresses;
+
+    const savedVoice = savedAddresses.find(
+      (address) =>
+        String(address.mediaType || '').toUpperCase() === 'PHONE' &&
+        String(address.type || '').toUpperCase() === addressType
+    );
+
+    const savedSms = savedAddresses.find(
+      (address) =>
+        String(address.mediaType || '').toUpperCase() === 'SMS' &&
+        String(address.type || '').toUpperCase() === addressType
+    );
+
+    return {
+      updated: true,
+      user:
+        updatedUser.name ||
+        currentUser.name ||
+        userRef.name ||
+        userId,
+      userId,
+      phoneNumber,
+      addressType,
+      voice: savedVoice
+        ? {
+            enabled: true,
+            integration: savedVoice.integration || null,
+          }
+        : {
+            enabled: false,
+          },
+      sms: savedSms
+        ? {
+            enabled: true,
+            integration: savedSms.integration || null,
+          }
+        : {
+            enabled: false,
+          },
+      note: 'Existing addresses were preserved. Voice and SMS are stored as separate Genesys Cloud address entries.',
+    };
+  },
+},
+  {
   name: 'set_user_direct_routing_tag',
   description: 'Add or remove the Genesys Cloud directrouting integration tag on one existing user phone, SMS, or email address. Use this tool whenever a user address must be enabled or disabled for direct routing. The tool preserves all existing user addresses and enforces only one directrouting tag per media type.',
   inputSchema: {
@@ -1456,7 +1680,7 @@ export async function callTool(cfg, name, args = {}) {
 
 // UI metadata - which tools are writes, and how they group on the landing page.
 export const WRITE_TOOLS = new Set([
-  'create_queue', 'create_user', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'set_user_direct_routing_tag',
+  'create_queue', 'create_user', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'set_user_direct_routing_tag', 'update_user_contact_options',
   'create_schedule', 'create_schedule_group',
   'create_contact_list', 'add_contacts', 'create_attempt_limits',
   'create_callable_time_set', 'create_dnc_list', 'create_campaign',
@@ -1468,7 +1692,7 @@ export const WRITE_TOOLS = new Set([
 export const TOOL_GROUPS = [
   { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
   { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'update_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
-  { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'set_user_direct_routing_tag'] },
+  { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'update_user_contact_options', 'set_user_direct_routing_tag'] },
   { name: 'Schedules & Hours', icon: '🕐', tools: ['list_schedules', 'create_schedule', 'create_schedule_group'] },
   { name: 'Outbound (Campaigns & Cadences)', icon: '📤', tools: ['list_contact_lists', 'get_contact_list', 'create_contact_list', 'add_contacts', 'create_attempt_limits', 'create_callable_time_set', 'create_dnc_list', 'list_campaigns', 'get_campaign', 'create_campaign', 'create_campaign_sequence', 'list_outbound_assets', 'render_cadence'] },
   { name: 'Flows (Architect)', icon: '🌳', tools: ['list_flows', 'get_flow', 'get_flow_configuration', 'list_prompts', 'render_flow', 'export_flow'] },
