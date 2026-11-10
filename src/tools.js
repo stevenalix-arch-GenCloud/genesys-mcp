@@ -76,10 +76,6 @@ function conversationIdFromInput(value) {
 // ---------- tools ----------
 
 export const TOOLS = [
-
-// ---------- tools ----------
-
-export const TOOLS = [
   {
     name: 'about',
     description: 'Who operates this server, why it exists, and the ground rules. Call this when you need context about the operator or how to behave.',
