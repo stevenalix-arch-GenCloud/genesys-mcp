@@ -78,7 +78,34 @@ export const TOOLS = [
       };
     },
   },
+  // ----- quality management -----
+  {
+    name: 'list_quality_evaluations',
+    description: 'List completed Genesys Cloud Quality Management evaluations for a specified date range.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        start_date: {
+          type: 'string',
+          description: 'Start date in YYYY-MM-DD format',
+        },
+        end_date: {
+          type: 'string',
+          description: 'End date in YYYY-MM-DD format',
+        },
+      },
+      required: ['start_date', 'end_date'],
+      additionalProperties: false,
+    },
 
+    handler: async (gc, a) => {
+      return {
+        message: 'Quality evaluation tool is installed. API retrieval will be added next.',
+        startDate: a.start_date,
+        endDate: a.end_date,
+      };
+    },
+  },
   // ----- queues & routing -----
   {
     name: 'list_queues',
