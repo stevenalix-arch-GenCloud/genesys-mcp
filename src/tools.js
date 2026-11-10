@@ -121,7 +121,6 @@ export const TOOLS = [
   return result;
 },
     },
-  },
   // ----- queues & routing -----
   {
     name: 'list_queues',
