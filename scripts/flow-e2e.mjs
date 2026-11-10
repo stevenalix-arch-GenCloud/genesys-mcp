@@ -69,8 +69,12 @@ console.log('\n=== render_flow on a pre-existing GUI-built flow ===');
 const rOld = await callTool(cfg, 'render_flow', { flow: 'Inbound Call Flow' });
 console.log(rOld.mermaid);
 
-console.log('\n=== assign_user_skill (ryan@outboundani.com only) ===');
-const asg = await callTool(cfg, 'assign_user_skill', { user: 'ryan@outboundani.com', skill: 'MCP_Test_Skill_msxg5lg7', proficiency: 3 });
+console.log('\n=== assign_user_skill ===');
+const asg = await callTool(cfg, 'assign_user_skill', {
+  user: vars.TEST_USER_EMAIL,
+  skill: 'MCP_Test_Skill_msxg5lg7',
+  proficiency: 3
+});
 console.log(JSON.stringify(asg));
 
 console.log('\nE2E complete.');
