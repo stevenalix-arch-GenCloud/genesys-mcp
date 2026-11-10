@@ -99,11 +99,27 @@ export const TOOLS = [
     },
 
     handler: async (gc, a) => {
-      return {
-        message: 'Quality evaluation tool is installed. API retrieval will be added next.',
-        startDate: a.start_date,
-        endDate: a.end_date,
-      };
+  const interval = `${a.start_date}T00:00:00.000Z/${a.end_date}T23:59:59.999Z`;
+
+  const result = await gc.post(
+    '/api/v2/analytics/evaluations/aggregates/query',
+    {
+      interval,
+      groupBy: [
+        'conversationId',
+        'evaluationId',
+        'formId',
+        'userId'
+      ],
+      metrics: [
+        'nEvaluations',
+        'oTotalScore'
+      ]
+    }
+  );
+
+  return result;
+},
     },
   },
   // ----- queues & routing -----
