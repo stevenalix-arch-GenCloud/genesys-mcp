@@ -612,6 +612,415 @@ if (conversations.length < pageSize) {
     },
   },
       // ----- conversations & interaction details -----
+    {
+    name: 'search_conversations_by_attribute',
+    description: 'Search all Genesys Cloud interactions in a date range for a custom participant attribute. Checks every participant attribute and returns matching conversation IDs, participants, and custom attributes. The attribute value is optional.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        start_date: {
+          type: 'string',
+          description: 'Start date in YYYY-MM-DD format.',
+        },
+        end_date: {
+          type: 'string',
+          description: 'End date in YYYY-MM-DD format. The inclusive range cannot exceed 7 calendar days.',
+        },
+        attribute_name: {
+          type: 'string',
+          description: 'Custom participant attribute name to find, for example TestingSetExtraData.',
+        },
+        attribute_value: {
+          type: 'string',
+          description: 'Optional attribute value to match. When omitted, any participant containing the attribute is returned.',
+        },
+        match_type: {
+          type: 'string',
+          enum: ['exact', 'contains'],
+          description: 'How to compare attribute_value. Defaults to exact.',
+        },
+        case_sensitive: {
+          type: 'boolean',
+          description: 'Use case-sensitive matching. Defaults to false.',
+        },
+        page_size: {
+          type: 'number',
+          description: 'Conversations retrieved per page, from 1 to 100. Defaults to 100.',
+        },
+        max_pages: {
+          type: 'number',
+          description: 'Maximum pages to inspect, from 1 to 50. Defaults to 50.',
+        },
+      },
+      required: [
+        'start_date',
+        'end_date',
+        'attribute_name',
+      ],
+      additionalProperties: false,
+    },
+
+    handler: async (gc, a) => {
+      const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+      if (
+        !datePattern.test(a.start_date) ||
+        !datePattern.test(a.end_date)
+      ) {
+        throw new GenesysError(
+          'start_date and end_date must use YYYY-MM-DD format.',
+          400
+        );
+      }
+
+      const startDate = new Date(
+        `${a.start_date}T00:00:00.000Z`
+      );
+
+      const endDate = new Date(
+        `${a.end_date}T00:00:00.000Z`
+      );
+
+      if (
+        Number.isNaN(startDate.getTime()) ||
+        Number.isNaN(endDate.getTime())
+      ) {
+        throw new GenesysError(
+          'start_date or end_date is not a valid date.',
+          400
+        );
+      }
+
+      if (endDate < startDate) {
+        throw new GenesysError(
+          'end_date must be on or after start_date.',
+          400
+        );
+      }
+
+      const calendarDays =
+        Math.floor(
+          (
+            endDate.getTime() -
+            startDate.getTime()
+          ) /
+          86400000
+        ) + 1;
+
+      if (calendarDays > 7) {
+        throw new GenesysError(
+          'The date range cannot exceed 7 calendar days. Divide larger searches into smaller requests.',
+          400
+        );
+      }
+
+      const attributeName = String(
+        a.attribute_name || ''
+      ).trim();
+
+      if (!attributeName) {
+        throw new GenesysError(
+          'attribute_name is required.',
+          400
+        );
+      }
+
+      const hasRequestedValue =
+        a.attribute_value !== undefined &&
+        a.attribute_value !== null;
+
+      const requestedValue =
+        hasRequestedValue
+          ? String(a.attribute_value)
+          : null;
+
+      const matchType =
+        a.match_type || 'exact';
+
+      const caseSensitive =
+        a.case_sensitive === true;
+
+      const pageSize = Math.max(
+        1,
+        Math.min(
+          100,
+          Math.floor(
+            Number(a.page_size) || 100
+          )
+        )
+      );
+
+      const maxPages = Math.max(
+        1,
+        Math.min(
+          50,
+          Math.floor(
+            Number(a.max_pages) || 50
+          )
+        )
+      );
+
+      const interval =
+        `${a.start_date}T00:00:00.000Z/` +
+        `${a.end_date}T23:59:59.999Z`;
+
+      function normalize(value) {
+        const text = String(value);
+
+        return caseSensitive
+          ? text
+          : text.toLowerCase();
+      }
+
+      function nameMatches(name) {
+        return (
+          normalize(name) ===
+          normalize(attributeName)
+        );
+      }
+
+      function valueMatches(value) {
+        if (!hasRequestedValue) {
+          return true;
+        }
+
+        const actualValue =
+          normalize(value);
+
+        const expectedValue =
+          normalize(requestedValue);
+
+        if (matchType === 'contains') {
+          return actualValue.includes(
+            expectedValue
+          );
+        }
+
+        return (
+          actualValue === expectedValue
+        );
+      }
+
+      const matchesByConversation =
+        new Map();
+
+      let pagesProcessed = 0;
+      let conversationsProcessed = 0;
+      let participantsProcessed = 0;
+      let attributesProcessed = 0;
+      let reachedLastPage = false;
+      let reportedTotalHits = null;
+
+      for (
+        let pageNumber = 1;
+        pageNumber <= maxPages;
+        pageNumber++
+      ) {
+        const result = await gc.post(
+          '/api/v2/analytics/conversations/details/query',
+          {
+            interval,
+            order: 'asc',
+            orderBy: 'conversationStart',
+            paging: {
+              pageSize,
+              pageNumber,
+            },
+          }
+        );
+
+        if (
+          typeof result.totalHits === 'number' &&
+          Number.isFinite(result.totalHits)
+        ) {
+          reportedTotalHits =
+            result.totalHits;
+        }
+
+        const conversations =
+          Array.isArray(
+            result.conversations
+          )
+            ? result.conversations
+            : [];
+
+        if (!conversations.length) {
+          reachedLastPage = true;
+          break;
+        }
+
+        pagesProcessed++;
+        conversationsProcessed +=
+          conversations.length;
+
+        for (
+          const conversation of conversations
+        ) {
+          const conversationId =
+            conversation.conversationId ||
+            conversation.id ||
+            null;
+
+          if (!conversationId) {
+            continue;
+          }
+
+          const participants =
+            Array.isArray(
+              conversation.participants
+            )
+              ? conversation.participants
+              : [];
+
+          participantsProcessed +=
+            participants.length;
+
+          const participantMatches = [];
+
+          for (
+            const participant of participants
+          ) {
+            const attributes =
+              participant.attributes &&
+              typeof participant.attributes ===
+                'object' &&
+              !Array.isArray(
+                participant.attributes
+              )
+                ? participant.attributes
+                : {};
+
+            const attributeEntries =
+              Object.entries(attributes);
+
+            attributesProcessed +=
+              attributeEntries.length;
+
+            const matchedAttributes =
+              attributeEntries
+                .filter(([name, value]) => {
+                  return (
+                    nameMatches(name) &&
+                    valueMatches(value)
+                  );
+                })
+                .map(([name, value]) => ({
+                  name,
+                  value,
+                }));
+
+            if (!matchedAttributes.length) {
+              continue;
+            }
+
+            participantMatches.push({
+              participantId:
+                participant.participantId ||
+                participant.id ||
+                null,
+              participantName:
+                participant.participantName ||
+                participant.name ||
+                null,
+              purpose:
+                participant.purpose ||
+                null,
+              userId:
+                participant.userId ||
+                participant.user?.id ||
+                null,
+              matchedAttributes,
+              allAttributes: attributes,
+            });
+          }
+
+          if (!participantMatches.length) {
+            continue;
+          }
+
+          matchesByConversation.set(
+            conversationId,
+            {
+              conversationId,
+              conversationStart:
+                conversation.conversationStart ||
+                null,
+              conversationEnd:
+                conversation.conversationEnd ||
+                null,
+              participants:
+                participantMatches,
+            }
+          );
+        }
+
+        if (
+          conversations.length < pageSize
+        ) {
+          reachedLastPage = true;
+          break;
+        }
+      }
+
+      const matches = [
+        ...matchesByConversation.values(),
+      ];
+
+      const participantMatches =
+        matches.reduce(
+          (total, conversation) =>
+            total +
+            conversation.participants.length,
+          0
+        );
+
+      const attributeMatches =
+        matches.reduce(
+          (conversationTotal, conversation) =>
+            conversationTotal +
+            conversation.participants.reduce(
+              (participantTotal, participant) =>
+                participantTotal +
+                participant.matchedAttributes.length,
+              0
+            ),
+          0
+        );
+
+      const truncated =
+        !reachedLastPage &&
+        pagesProcessed >= maxPages;
+
+      return {
+        startDate: a.start_date,
+        endDate: a.end_date,
+        calendarDays,
+        attributeName,
+        attributeValue:
+          hasRequestedValue
+            ? requestedValue
+            : null,
+        matchType,
+        caseSensitive,
+        pageSize,
+        maxPages,
+        reportedTotalHits,
+        pagesProcessed,
+        conversationsProcessed,
+        participantsProcessed,
+        attributesProcessed,
+        conversationsMatched:
+          matches.length,
+        participantMatches,
+        attributeMatches,
+        truncated,
+        matches,
+        note: truncated
+          ? 'The search reached max_pages before confirming the final page. Reduce the date range or divide the search into smaller requests.'
+          : 'The requested date range was fully scanned.',
+      };
+    },
+  },
   {
     name: 'get_conversation_details',
     description: 'Get a comprehensive read-only view of one Genesys Cloud conversation. Accepts a conversation ID or full Genesys interaction URL and returns ANI, DNIS, timing, media, participants, custom participant attributes, flows, queues, agents, transfers, wrap-up data, recordings, voice-quality metrics, surveys, evaluations, and routing details when available.',
@@ -3155,7 +3564,7 @@ export const TOOL_GROUPS = [
   { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
   { name: 'Quality Management', icon: '📊', tools: ['list_quality_evaluations', 'get_quality_evaluation', 'get_quality_evaluation_form', 'get_quality_question_scores', 'get_quality_conversation'] },
   { name: 'Customer Surveys', icon: '📝', tools: ['list_quality_surveys', 'find_quality_survey_responses', 'get_quality_survey', 'get_quality_survey_form', 'get_quality_survey_question_scores'] },
-  { name: 'Conversations & Interaction Details', icon: '🔎', tools: ['get_conversation_details'] },
+  { name: 'Conversations & Interaction Details', icon: '🔎', tools: ['search_conversations_by_attribute', 'get_conversation_details'] },
   { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'update_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
   { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'update_user_contact_options', 'set_user_direct_routing_tag'] },
   { name: 'Schedules & Hours', icon: '🕐', tools: ['list_schedules', 'create_schedule', 'create_schedule_group'] },
