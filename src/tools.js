@@ -318,6 +318,175 @@ return {
       };
     },
   },
+
+    {
+    name: 'find_quality_survey_responses',
+    description: 'Find individual Genesys Cloud survey responses for a date range. Returns the survey ID, conversation ID, survey form ID, status, and agent user IDs needed by the detailed survey tools.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        start_date: {
+          type: 'string',
+          description: 'Start date in YYYY-MM-DD format',
+        },
+        end_date: {
+          type: 'string',
+          description: 'End date in YYYY-MM-DD format',
+        },
+        page_size: {
+          type: 'number',
+          description: 'Conversations per page, from 1 to 100. Defaults to 100.',
+        },
+        max_pages: {
+          type: 'number',
+          description: 'Maximum pages to retrieve. Defaults to 10 and cannot exceed 20.',
+        },
+      },
+      required: ['start_date', 'end_date'],
+      additionalProperties: false,
+    },
+
+    handler: async (gc, a) => {
+      const interval =
+        `${a.start_date}T00:00:00.000Z/` +
+        `${a.end_date}T23:59:59.999Z`;
+
+      const pageSize = Math.max(
+        1,
+        Math.min(100, Number(a.page_size) || 100)
+      );
+
+      const maxPages = Math.max(
+        1,
+        Math.min(20, Number(a.max_pages) || 10)
+      );
+
+      const surveys = [];
+      let conversationsProcessed = 0;
+      let pagesProcessed = 0;
+
+      for (
+        let pageNumber = 1;
+        pageNumber <= maxPages;
+        pageNumber++
+      ) {
+        const result = await gc.post(
+          '/api/v2/analytics/conversations/details/query',
+          {
+            interval,
+            order: 'asc',
+            orderBy: 'conversationStart',
+            paging: {
+              pageSize,
+              pageNumber,
+            },
+          }
+        );
+
+        const conversations = Array.isArray(result.conversations)
+          ? result.conversations
+          : [];
+
+        if (!conversations.length) {
+          break;
+        }
+
+        pagesProcessed++;
+        conversationsProcessed += conversations.length;
+
+        for (const conversation of conversations) {
+          const conversationId =
+            conversation.conversationId ||
+            conversation.id ||
+            null;
+
+          const conversationSurveys = Array.isArray(
+            conversation.surveys
+          )
+            ? conversation.surveys
+            : [];
+
+          const agentUserIds = [
+            ...new Set(
+              (conversation.participants || [])
+                .filter(
+                  (participant) =>
+                    String(
+                      participant.purpose || ''
+                    ).toLowerCase() === 'agent'
+                )
+                .map(
+                  (participant) =>
+                    participant.userId ||
+                    participant.user?.id
+                )
+                .filter(Boolean)
+            ),
+          ];
+
+          for (const survey of conversationSurveys) {
+            const surveyId =
+              survey.surveyId ||
+              survey.id ||
+              null;
+
+            if (!surveyId) {
+              continue;
+            }
+
+            surveys.push({
+              surveyId,
+              conversationId,
+              surveyFormId:
+                survey.surveyFormId ||
+                survey.formId ||
+                survey.surveyForm?.id ||
+                null,
+              status:
+                survey.status ||
+                survey.surveyStatus ||
+                null,
+              agentUserIds,
+              conversationStart:
+                conversation.conversationStart ||
+                null,
+              conversationEnd:
+                conversation.conversationEnd ||
+                null,
+            });
+          }
+        }
+
+        if (
+          conversations.length < pageSize ||
+          pageNumber >= (result.totalHits || 0)
+        ) {
+          if (conversations.length < pageSize) {
+            break;
+          }
+        }
+      }
+
+      const uniqueSurveys = [
+        ...new Map(
+          surveys.map((survey) => [
+            survey.surveyId,
+            survey,
+          ])
+        ).values(),
+      ];
+
+      return {
+        startDate: a.start_date,
+        endDate: a.end_date,
+        surveysFound: uniqueSurveys.length,
+        conversationsProcessed,
+        pagesProcessed,
+        truncated: pagesProcessed >= maxPages,
+        surveys: uniqueSurveys,
+      };
+    },
+  },
   {
     name: 'get_quality_survey',
     description: 'Get one Genesys Cloud Quality Management survey response by survey ID, including its status, answers, and scoring data.',
@@ -2035,7 +2204,7 @@ export const WRITE_TOOLS = new Set([
 export const TOOL_GROUPS = [
   { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
   { name: 'Quality Management', icon: '📊', tools: ['list_quality_evaluations', 'get_quality_evaluation', 'get_quality_evaluation_form', 'get_quality_question_scores', 'get_quality_conversation'] },
-  { name: 'Customer Surveys', icon: '📝', tools: ['list_quality_surveys', 'get_quality_survey', 'get_quality_survey_form', 'get_quality_survey_question_scores'] },
+  { name: 'Customer Surveys', icon: '📝', tools: ['list_quality_surveys', 'find_quality_survey_responses', 'get_quality_survey', 'get_quality_survey_form', 'get_quality_survey_question_scores'] },
   { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'update_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
   { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'update_user_contact_options', 'set_user_direct_routing_tag'] },
   { name: 'Schedules & Hours', icon: '🕐', tools: ['list_schedules', 'create_schedule', 'create_schedule_group'] },
