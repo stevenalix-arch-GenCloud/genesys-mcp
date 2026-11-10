@@ -610,7 +610,7 @@ if (conversations.length < pageSize) {
       };
     },
   },
-    // ----- conversations & interaction details -----
+      // ----- conversations & interaction details -----
   {
     name: 'get_conversation_details',
     description: 'Get a comprehensive read-only view of one Genesys Cloud conversation. Accepts a conversation ID or full Genesys interaction URL and returns ANI, DNIS, timing, media, participants, custom participant attributes, flows, queues, agents, transfers, wrap-up data, recordings, voice-quality metrics, surveys, evaluations, and routing details when available.',
@@ -816,7 +816,730 @@ if (conversations.length < pageSize) {
         ]),
       ];
 
-      const participants
+      const participants = participantIds.map(
+        (participantId) => {
+          const operationalParticipant =
+            operationalById.get(participantId) || {};
+
+          const analyticsParticipant =
+            analyticsById.get(participantId) || {};
+
+          const sessions = sessionsFor(
+            analyticsParticipant
+          );
+
+          const segments = segmentsFor(
+            analyticsParticipant
+          );
+
+          const attributes =
+            operationalParticipant.attributes &&
+            typeof operationalParticipant.attributes ===
+              'object'
+              ? operationalParticipant.attributes
+              : {};
+
+          const queues = [
+            ...new Map(
+              segments
+                .filter(
+                  ({ segment }) =>
+                    segment.queueId
+                )
+                .map(({ segment }) => [
+                  segment.queueId,
+                  {
+                    id: segment.queueId,
+                    name:
+                      segment.queueName ||
+                      null,
+                  },
+                ])
+            ).values(),
+          ];
+
+          const flows = [
+            ...new Map(
+              segments
+                .filter(
+                  ({ segment }) =>
+                    segment.flowId
+                )
+                .map(({ segment }) => [
+                  segment.flowId,
+                  {
+                    id: segment.flowId,
+                    name:
+                      segment.flowName ||
+                      null,
+                    version:
+                      segment.flowVersion ||
+                      null,
+                    type:
+                      segment.segmentType ||
+                      null,
+                  },
+                ])
+            ).values(),
+          ];
+
+          const wrapUpCodes = [
+            ...new Map(
+              segments
+                .filter(
+                  ({ segment }) =>
+                    segment.wrapUpCode
+                )
+                .map(({ segment }) => [
+                  segment.wrapUpCode,
+                  {
+                    id: segment.wrapUpCode,
+                    name:
+                      segment.wrapUpCodeName ||
+                      null,
+                  },
+                ])
+            ).values(),
+          ];
+
+          const disconnectReasons = [
+            ...new Set(
+              segments
+                .map(
+                  ({ segment }) =>
+                    segment.disconnectType ||
+                    segment.disconnectReason
+                )
+                .filter(Boolean)
+            ),
+          ];
+
+          const mediaTypes = [
+            ...new Set(
+              sessions
+                .map(
+                  (session) =>
+                    session.mediaType
+                )
+                .filter(Boolean)
+            ),
+          ];
+
+          const directions = [
+            ...new Set(
+              sessions
+                .map(
+                  (session) =>
+                    session.direction
+                )
+                .filter(Boolean)
+            ),
+          ];
+
+          const recordingIds = [
+            ...new Set(
+              [
+                ...sessions.map(
+                  (session) =>
+                    session.recordingId
+                ),
+                ...segments.map(
+                  ({ segment }) =>
+                    segment.recordingId
+                ),
+              ].filter(Boolean)
+            ),
+          ];
+
+          return {
+            participantId,
+            name:
+              firstDefined(
+                operationalParticipant.name,
+                analyticsParticipant.participantName
+              ) || null,
+            purpose:
+              firstDefined(
+                operationalParticipant.purpose,
+                analyticsParticipant.purpose
+              ) || null,
+            userId:
+              firstDefined(
+                operationalParticipant.userId,
+                operationalParticipant.user?.id,
+                analyticsParticipant.userId
+              ) || null,
+            externalContactId:
+              firstDefined(
+                operationalParticipant.externalContactId,
+                operationalParticipant.externalContact?.id,
+                analyticsParticipant.externalContactId
+              ) || null,
+            ani:
+              firstDefined(
+                operationalParticipant.ani,
+                ...sessions.map(
+                  (session) => session.ani
+                )
+              ) || null,
+            aniName:
+              firstDefined(
+                operationalParticipant.aniName,
+                ...sessions.map(
+                  (session) =>
+                    session.aniName
+                )
+              ) || null,
+            dnis:
+              firstDefined(
+                operationalParticipant.dnis,
+                ...sessions.map(
+                  (session) => session.dnis
+                )
+              ) || null,
+            address:
+              firstDefined(
+                operationalParticipant.address,
+                analyticsParticipant.externalAddress
+              ) || null,
+            connectedTime:
+              operationalParticipant.connectedTime ||
+              null,
+            endTime:
+              operationalParticipant.endTime ||
+              null,
+            mediaTypes,
+            directions,
+            attributes,
+            queues,
+            flows,
+            wrapUpCodes,
+            disconnectReasons,
+            recordingIds,
+            metrics: {
+              alertMs: sumMetric(
+                analyticsParticipant,
+                'tAlert'
+              ),
+              talkMs: sumMetric(
+                analyticsParticipant,
+                'tTalk'
+              ),
+              holdMs: sumMetric(
+                analyticsParticipant,
+                'tHeld'
+              ),
+              acwMs: sumMetric(
+                analyticsParticipant,
+                'tAcw'
+              ),
+              handleMs: sumMetric(
+                analyticsParticipant,
+                'tHandle'
+              ),
+              interactMs: sumMetric(
+                analyticsParticipant,
+                'tInteract'
+              ),
+              ivrMs: sumMetric(
+                analyticsParticipant,
+                'tIvr'
+              ),
+              flowMs: sumMetric(
+                analyticsParticipant,
+                'tFlow'
+              ),
+              answeredCount: sumMetric(
+                analyticsParticipant,
+                'nAnswered'
+              ),
+              transferredCount: sumMetric(
+                analyticsParticipant,
+                'nTransferred'
+              ),
+            },
+            sessions: sessions.map(
+              (session) => ({
+                sessionId:
+                  session.sessionId ||
+                  session.id ||
+                  null,
+                mediaType:
+                  session.mediaType ||
+                  null,
+                direction:
+                  session.direction ||
+                  null,
+                ani:
+                  session.ani ||
+                  null,
+                aniName:
+                  session.aniName ||
+                  null,
+                dnis:
+                  session.dnis ||
+                  null,
+                protocolCallId:
+                  session.protocolCallId ||
+                  null,
+                recordingId:
+                  session.recordingId ||
+                  null,
+                edgeId:
+                  session.edgeId ||
+                  null,
+                peerId:
+                  session.peerId ||
+                  null,
+                segments:
+                  Array.isArray(
+                    session.segments
+                  )
+                    ? session.segments
+                    : [],
+              })
+            ),
+          };
+        }
+      );
+
+      const attributeParticipants =
+        participants
+          .filter(
+            (participant) =>
+              Object.keys(
+                participant.attributes
+              ).length > 0
+          )
+          .map((participant) => ({
+            participantId:
+              participant.participantId,
+            participantName:
+              participant.name,
+            purpose:
+              participant.purpose,
+            attributes:
+              participant.attributes,
+          }));
+
+      const flattenedAttributes =
+        attributeParticipants.flatMap(
+          (participant) =>
+            Object.entries(
+              participant.attributes
+            ).map(([name, value]) => ({
+              participantId:
+                participant.participantId,
+              participantName:
+                participant.participantName,
+              purpose:
+                participant.purpose,
+              name,
+              value,
+            }))
+        );
+
+      const allSegments =
+        analyticsParticipants.flatMap(
+          (participant) =>
+            segmentsFor(participant).map(
+              ({ session, segment }) => ({
+                participantId:
+                  participant.participantId ||
+                  null,
+                participantPurpose:
+                  participant.purpose ||
+                  null,
+                participantName:
+                  participant.participantName ||
+                  null,
+                sessionId:
+                  session.sessionId ||
+                  session.id ||
+                  null,
+                mediaType:
+                  session.mediaType ||
+                  null,
+                direction:
+                  session.direction ||
+                  null,
+                ...segment,
+              })
+            )
+        );
+
+      const flows = [
+        ...new Map(
+          allSegments
+            .filter(
+              (segment) => segment.flowId
+            )
+            .map((segment) => [
+              segment.flowId,
+              {
+                id: segment.flowId,
+                name:
+                  segment.flowName ||
+                  null,
+                version:
+                  segment.flowVersion ||
+                  null,
+                participantId:
+                  segment.participantId,
+                participantPurpose:
+                  segment.participantPurpose,
+                segmentType:
+                  segment.segmentType ||
+                  null,
+                start:
+                  segment.segmentStart ||
+                  null,
+                end:
+                  segment.segmentEnd ||
+                  null,
+                durationMs: durationMs(
+                  segment.segmentStart,
+                  segment.segmentEnd
+                ),
+                exitReason:
+                  segment.flowOutType ||
+                  segment.disconnectType ||
+                  null,
+              },
+            ])
+        ).values(),
+      ];
+
+      const queues = [
+        ...new Map(
+          allSegments
+            .filter(
+              (segment) => segment.queueId
+            )
+            .map((segment) => [
+              segment.queueId,
+              {
+                id: segment.queueId,
+                name:
+                  segment.queueName ||
+                  null,
+              },
+            ])
+        ).values(),
+      ];
+
+      const wrapUpCodes = [
+        ...new Map(
+          allSegments
+            .filter(
+              (segment) =>
+                segment.wrapUpCode
+            )
+            .map((segment) => [
+              segment.wrapUpCode,
+              {
+                id: segment.wrapUpCode,
+                name:
+                  segment.wrapUpCodeName ||
+                  null,
+                participantId:
+                  segment.participantId,
+              },
+            ])
+        ).values(),
+      ];
+
+      const transfers = allSegments
+        .filter(
+          (segment) =>
+            segment.segmentType ===
+              'transfer' ||
+            segment.transferType ||
+            segment.transferTargetAddress ||
+            segment.destinationParticipantId
+        )
+        .map((segment) => ({
+          participantId:
+            segment.participantId,
+          participantPurpose:
+            segment.participantPurpose,
+          start:
+            segment.segmentStart ||
+            null,
+          end:
+            segment.segmentEnd ||
+            null,
+          transferType:
+            segment.transferType ||
+            segment.segmentType ||
+            null,
+          destinationParticipantId:
+            segment.destinationParticipantId ||
+            null,
+          targetAddress:
+            segment.transferTargetAddress ||
+            null,
+          queueId:
+            segment.queueId ||
+            null,
+          disconnectType:
+            segment.disconnectType ||
+            null,
+        }));
+
+      const surveys = Array.isArray(
+        analytics?.surveys
+      )
+        ? analytics.surveys.map((survey) => ({
+            surveyId:
+              survey.surveyId ||
+              survey.id ||
+              null,
+            surveyFormId:
+              survey.surveyFormId ||
+              survey.formId ||
+              survey.surveyForm?.id ||
+              null,
+            status:
+              survey.status ||
+              survey.surveyStatus ||
+              null,
+            totalScore:
+              survey.totalScore ??
+              survey.score ??
+              null,
+            userId:
+              survey.userId ||
+              null,
+          }))
+        : [];
+
+      const evaluations = Array.isArray(
+        analytics?.evaluations
+      )
+        ? analytics.evaluations.map(
+            (evaluation) => ({
+              evaluationId:
+                evaluation.evaluationId ||
+                evaluation.id ||
+                null,
+              evaluationFormId:
+                evaluation.evaluationFormId ||
+                evaluation.formId ||
+                evaluation.evaluationForm?.id ||
+                null,
+              userId:
+                evaluation.userId ||
+                null,
+              evaluatorId:
+                evaluation.evaluatorId ||
+                null,
+              status:
+                evaluation.status ||
+                null,
+              totalScore:
+                evaluation.totalScore ??
+                evaluation.score ??
+                null,
+            })
+          )
+        : [];
+
+      const allSessions =
+        analyticsParticipants.flatMap(
+          (participant) =>
+            sessionsFor(participant)
+        );
+
+      const customerParticipants =
+        participants.filter(
+          (participant) =>
+            String(
+              participant.purpose || ''
+            ).toLowerCase() === 'customer'
+        );
+
+      const ani =
+        firstDefined(
+          operational?.ani,
+          ...customerParticipants.map(
+            (participant) =>
+              participant.ani
+          ),
+          ...allSessions.map(
+            (session) => session.ani
+          )
+        ) || null;
+
+      const aniName =
+        firstDefined(
+          operational?.aniName,
+          ...customerParticipants.map(
+            (participant) =>
+              participant.aniName ||
+              participant.name
+          ),
+          ...allSessions.map(
+            (session) => session.aniName
+          )
+        ) || null;
+
+      const dnis =
+        firstDefined(
+          operational?.dnis,
+          ...customerParticipants.map(
+            (participant) =>
+              participant.dnis
+          ),
+          ...allSessions.map(
+            (session) => session.dnis
+          )
+        ) || null;
+
+      const startTime =
+        firstDefined(
+          analytics?.conversationStart,
+          operational?.startTime
+        ) || null;
+
+      const endTime =
+        firstDefined(
+          analytics?.conversationEnd,
+          operational?.endTime
+        ) || null;
+
+      const mediaTypes = [
+        ...new Set(
+          allSessions
+            .map(
+              (session) =>
+                session.mediaType
+            )
+            .filter(Boolean)
+        ),
+      ];
+
+      const directions = [
+        ...new Set(
+          allSessions
+            .map(
+              (session) =>
+                session.direction
+            )
+            .filter(Boolean)
+        ),
+      ];
+
+      const recordingIds = [
+        ...new Set(
+          participants.flatMap(
+            (participant) =>
+              participant.recordingIds
+          )
+        ),
+      ];
+
+      const disconnectReasons = [
+        ...new Set(
+          participants.flatMap(
+            (participant) =>
+              participant.disconnectReasons
+          )
+        ),
+      ];
+
+      const summary = {
+        conversationId,
+        startTime,
+        endTime,
+        durationMs: durationMs(
+          startTime,
+          endTime
+        ),
+        directions,
+        mediaTypes,
+        ani,
+        aniName,
+        dnis,
+        recorded:
+          recordingIds.length > 0 ||
+          Boolean(
+            analytics?.recordingState ||
+            operational?.recordingState
+          ),
+        recordingIds,
+        recordingState:
+          analytics?.recordingState ||
+          operational?.recordingState ||
+          null,
+        disconnectReasons,
+        quality: {
+          minimumMos: minimumMetric(
+            analyticsParticipants,
+            [
+              'minMos',
+              'oMediaStatsMinMos',
+              'oExternalMediaStatsMinMos',
+            ]
+          ),
+          minimumRFactor: minimumMetric(
+            analyticsParticipants,
+            [
+              'minRFactor',
+              'oMediaStatsMinRFactor',
+              'oExternalMediaStatsMinRFactor',
+            ]
+          ),
+        },
+        flows,
+        queues,
+        transfers,
+        wrapUpCodes,
+        surveys,
+        evaluations,
+        customAttributes: {
+          participantCount:
+            attributeParticipants.length,
+          attributeCount:
+            flattenedAttributes.length,
+          byParticipant:
+            attributeParticipants,
+          flattened:
+            flattenedAttributes,
+        },
+        participants,
+        retrieval: {
+          operationalConversationAvailable:
+            Boolean(operational),
+          analyticsDetailsAvailable:
+            Boolean(analytics),
+          operationalError:
+            operationalResult.status ===
+            'rejected'
+              ? operationalResult.reason
+                  ?.message || 'Request failed'
+              : null,
+          analyticsError:
+            analyticsResult.status ===
+            'rejected'
+              ? analyticsResult.reason
+                  ?.message || 'Request failed'
+              : null,
+        },
+      };
+
+      if (a.include_raw === true) {
+        summary.raw = {
+          operationalConversation:
+            operational,
+          analyticsDetails:
+            analytics,
+        };
+      }
+
+      return summary;
+    },
+  },
   // ----- queues & routing -----
   {
     name: 'list_queues',
