@@ -1628,7 +1628,7 @@ export function toolDefs() {
             type: 'string',
             enum: ['dev', 'edcisbu'],
             description:
-              'Genesys Cloud organization to use. Use "dev" for Development or "edcisbu" for EDCiSBU.'
+              'Genesys Cloud organization to use. Use "dev" for GC Orgs - East Region or "edcisbu" for GC Orgs - West Region.'
           },
           ...(inputSchema?.properties || {})
         }
