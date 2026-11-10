@@ -362,14 +362,15 @@ return {
       );
 
       const surveys = [];
-      let conversationsProcessed = 0;
-      let pagesProcessed = 0;
+let conversationsProcessed = 0;
+let pagesProcessed = 0;
+let reachedLastPage = false;
 
-      for (
-        let pageNumber = 1;
-        pageNumber <= maxPages;
-        pageNumber++
-      ) {
+for (
+  let pageNumber = 1;
+  pageNumber <= maxPages;
+  pageNumber++
+) {
         const result = await gc.post(
           '/api/v2/analytics/conversations/details/query',
           {
@@ -457,14 +458,10 @@ return {
           }
         }
 
-        if (
-          conversations.length < pageSize ||
-          pageNumber >= (result.totalHits || 0)
-        ) {
-          if (conversations.length < pageSize) {
-            break;
-          }
-        }
+if (conversations.length < pageSize) {
+  reachedLastPage = true;
+  break;
+}
       }
 
       const uniqueSurveys = [
@@ -482,7 +479,9 @@ return {
         surveysFound: uniqueSurveys.length,
         conversationsProcessed,
         pagesProcessed,
-        truncated: pagesProcessed >= maxPages,
+        truncated:
+          pagesProcessed >= maxPages &&
+          !reachedLastPage,
         surveys: uniqueSurveys,
       };
     },
