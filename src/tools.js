@@ -52,6 +52,31 @@ async function resolveUser(gc, ref) {
 
 const slim = (e) => ({ id: e.id, name: e.name, ...(e.email ? { email: e.email } : {}), ...(e.state && e.state !== 'active' ? { state: e.state } : {}) });
 
+function conversationIdFromInput(value) {
+  const input = String(value || '').trim();
+
+  if (GUID_RE.test(input)) {
+    return input;
+  }
+
+  const match = input.match(
+    /\/analytics\/interactions\/([0-9a-f-]{36})(?:\/|$)/i
+  );
+
+  if (match && GUID_RE.test(match[1])) {
+    return match[1];
+  }
+
+  throw new GenesysError(
+    'Provide a valid Genesys Cloud conversation ID or interaction URL.',
+    400
+  );
+}
+
+// ---------- tools ----------
+
+export const TOOLS = [
+
 // ---------- tools ----------
 
 export const TOOLS = [
@@ -589,7 +614,213 @@ if (conversations.length < pageSize) {
       };
     },
   },
-  
+    // ----- conversations & interaction details -----
+  {
+    name: 'get_conversation_details',
+    description: 'Get a comprehensive read-only view of one Genesys Cloud conversation. Accepts a conversation ID or full Genesys interaction URL and returns ANI, DNIS, timing, media, participants, custom participant attributes, flows, queues, agents, transfers, wrap-up data, recordings, voice-quality metrics, surveys, evaluations, and routing details when available.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        conversation: {
+          type: 'string',
+          description: 'Genesys Cloud conversation ID or full interaction URL',
+        },
+        include_raw: {
+          type: 'boolean',
+          description: 'Include the complete raw operational conversation and analytics detail responses. Defaults to false.',
+        },
+      },
+      required: ['conversation'],
+      additionalProperties: false,
+    },
+
+    handler: async (gc, a) => {
+      const conversationId = conversationIdFromInput(
+        a.conversation
+      );
+
+      const [
+        operationalResult,
+        analyticsResult,
+      ] = await Promise.allSettled([
+        gc.get(
+          `/api/v2/conversations/${conversationId}`
+        ),
+        gc.get(
+          `/api/v2/analytics/conversations/${conversationId}/details`
+        ),
+      ]);
+
+      const operational =
+        operationalResult.status === 'fulfilled'
+          ? operationalResult.value
+          : null;
+
+      const analytics =
+        analyticsResult.status === 'fulfilled'
+          ? analyticsResult.value
+          : null;
+
+      if (!operational && !analytics) {
+        const operationalError =
+          operationalResult.reason?.message ||
+          'Operational conversation request failed';
+
+        const analyticsError =
+          analyticsResult.reason?.message ||
+          'Analytics conversation request failed';
+
+        throw new GenesysError(
+          `Unable to retrieve conversation ${conversationId}. ` +
+          `Operational API: ${operationalError}. ` +
+          `Analytics API: ${analyticsError}.`,
+          operationalResult.reason?.status ||
+            analyticsResult.reason?.status ||
+            502
+        );
+      }
+
+      function firstDefined(...values) {
+        return values.find(
+          (value) =>
+            value !== undefined &&
+            value !== null &&
+            value !== ''
+        );
+      }
+
+      function durationMs(start, end) {
+        if (!start || !end) {
+          return null;
+        }
+
+        const value =
+          new Date(end).getTime() -
+          new Date(start).getTime();
+
+        return Number.isFinite(value) && value >= 0
+          ? value
+          : null;
+      }
+
+      function sessionsFor(participant) {
+        return Array.isArray(participant?.sessions)
+          ? participant.sessions
+          : [];
+      }
+
+      function segmentsFor(participant) {
+        return sessionsFor(participant).flatMap(
+          (session) =>
+            Array.isArray(session.segments)
+              ? session.segments.map((segment) => ({
+                  session,
+                  segment,
+                }))
+              : []
+        );
+      }
+
+      function metricsFor(participant) {
+        return sessionsFor(participant).flatMap(
+          (session) =>
+            Array.isArray(session.metrics)
+              ? session.metrics.map((metric) => ({
+                  session,
+                  metric,
+                }))
+              : []
+        );
+      }
+
+      function metricValues(participant, metricName) {
+        return metricsFor(participant)
+          .filter(
+            ({ metric }) =>
+              metric?.name === metricName
+          )
+          .map(({ metric }) => metric.value)
+          .filter(
+            (value) =>
+              typeof value === 'number' &&
+              Number.isFinite(value)
+          );
+      }
+
+      function sumMetric(participant, metricName) {
+        const values = metricValues(
+          participant,
+          metricName
+        );
+
+        return values.length
+          ? values.reduce(
+              (total, value) => total + value,
+              0
+            )
+          : null;
+      }
+
+      function minimumMetric(
+        participants,
+        metricNames
+      ) {
+        const values = participants.flatMap(
+          (participant) =>
+            metricNames.flatMap((metricName) =>
+              metricValues(
+                participant,
+                metricName
+              )
+            )
+        );
+
+        return values.length
+          ? Math.min(...values)
+          : null;
+      }
+
+      const operationalParticipants = Array.isArray(
+        operational?.participants
+      )
+        ? operational.participants
+        : [];
+
+      const analyticsParticipants = Array.isArray(
+        analytics?.participants
+      )
+        ? analytics.participants
+        : [];
+
+      const operationalById = new Map(
+        operationalParticipants
+          .filter((participant) => participant?.id)
+          .map((participant) => [
+            participant.id,
+            participant,
+          ])
+      );
+
+      const analyticsById = new Map(
+        analyticsParticipants
+          .filter(
+            (participant) =>
+              participant?.participantId
+          )
+          .map((participant) => [
+            participant.participantId,
+            participant,
+          ])
+      );
+
+      const participantIds = [
+        ...new Set([
+          ...operationalById.keys(),
+          ...analyticsById.keys(),
+        ]),
+      ];
+
+      const participants
   // ----- queues & routing -----
   {
     name: 'list_queues',
@@ -2204,6 +2435,7 @@ export const TOOL_GROUPS = [
   { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
   { name: 'Quality Management', icon: '📊', tools: ['list_quality_evaluations', 'get_quality_evaluation', 'get_quality_evaluation_form', 'get_quality_question_scores', 'get_quality_conversation'] },
   { name: 'Customer Surveys', icon: '📝', tools: ['list_quality_surveys', 'find_quality_survey_responses', 'get_quality_survey', 'get_quality_survey_form', 'get_quality_survey_question_scores'] },
+  { name: 'Conversations & Interaction Details', icon: '🔎', tools: ['get_conversation_details'] },
   { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'update_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
   { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'update_user_contact_options', 'set_user_direct_routing_tag'] },
   { name: 'Schedules & Hours', icon: '🕐', tools: ['list_schedules', 'create_schedule', 'create_schedule_group'] },
