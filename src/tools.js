@@ -156,9 +156,15 @@ export const TOOLS = [
         a.evaluation_id
       );
 
-      return gc.get(
-        `/api/v2/quality/conversations/${conversationId}/evaluations/${evaluationId}`
-      );
+     const evaluation = await gc.get(
+  `/api/v2/quality/conversations/${conversationId}/evaluations/${evaluationId}`
+);
+
+return {
+  conversationId,
+  evaluationId,
+  evaluation,
+  };
     },
   },
 
