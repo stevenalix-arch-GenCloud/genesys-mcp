@@ -157,7 +157,7 @@ export function refusalFor(method, path, body, query) {
   if (queryErr) return queryErr;
 
   // Credential, role, subject, and permission reads are refused.
-  // Division reads remain available through ordinary GET requests. (matches ringcx-mcp): OAuth clients,
+  // Division reads remain available through ordinary GET requests. OAuth clients,
   // tokens, and role grants are not contact center config.
   if (m === 'GET' && CREDENTIAL_READS.test(path)) return 'Refused: OAuth clients, tokens, credentials, and authorization/role data are out of scope for the raw tool, reads included. View those in Admin > Integrations / Roles.';
   if (m === 'GET') return null; // reads stay broad once the path is clean; responses are redacted
