@@ -1,8 +1,11 @@
 // Configuration resolution for multiple Genesys Cloud organizations.
 //
 // KV configurations:
-//   1. genesys-config          = Development organization
-//   2. genesys-config-edcisbu  = EDCiSBU organization
+//   1. genesys-config          = GC Orgs - East Region
+//   2. genesys-config-edcisbu  = GC Orgs - West Region
+//
+// East Region uses mypurecloud.com.
+// West Region uses usw2.pure.cloud.
 //
 // MCP_AUTH_TOKEN remains a shared Wrangler secret when configured.
 
@@ -12,11 +15,11 @@ const KV_KEY_EDCiSBU = 'genesys-config-edcisbu';
 const ORG_CONFIGS = Object.freeze({
   dev: {
     key: KV_KEY,
-    label: 'Development',
+    label: 'GC Orgs - East Region',
   },
   edcisbu: {
     key: KV_KEY_EDCiSBU,
-    label: 'EDCiSBU',
+    label: 'GC Orgs - West Region',
   },
 });
 /**
