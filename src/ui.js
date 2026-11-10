@@ -1,6 +1,6 @@
 // Web UI - a landing page (GET /) and setup wizard (GET /setup). Pure
-// server-rendered HTML with inline CSS/JS, no assets. (The interactive tool
-// console from five9-mcp is on the roadmap.)
+// server-rendered HTML with inline CSS/JS, no assets. An interactive tool
+// console is on the roadmap.
 import { TOOL_GROUPS as GROUPS, WRITE_TOOLS, REGIONS } from './tools.js';
 
 function esc(s) {
@@ -102,7 +102,7 @@ export function landingPage(tools, cfg = { configured: true }) {
       ${cfg.configured
         ? '<a class="btn primary" href="#tools">🛠️ Browse the tools</a>'
         : '<a class="btn primary" href="/setup">⚙️ Finish setup - connect your Genesys org</a>'}
-      <a class="btn" href="https://github.com/outboundani/genesys-mcp">★ Star on GitHub</a>
+      <a class="btn" href="https://github.com/stevenalix-arch-GenCloud/genesys-mcp/tree/main">★ Star on GitHub</a>
     </div>
     ${cfg.configured ? '' : `<p style="margin-top:1rem"><span class="pill">👋 This server isn't connected to a Genesys Cloud org yet - <a href="/setup">finish setup</a> (takes 1 minute, no terminal needed)</span></p>`}
   </div>
@@ -123,7 +123,7 @@ export function landingPage(tools, cfg = { configured: true }) {
 
   <h2 id="tools">Tools</h2>
   ${toolCards}
-  <footer>genesys-mcp · MIT · built by <a href="https://www.linkedin.com/in/ryanshatzkamer">Ryan Shatzkamer</a> (outboundIQ) · creator of <a href="https://github.com/ryanshatz/five9-mcp">five9-mcp</a></footer>
+  <footer>genesys-mcp · MIT · Genesys Cloud MCP Server</footer>
   </main>`);
 }
 
