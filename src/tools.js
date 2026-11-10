@@ -118,7 +118,11 @@ export const TOOLS = [
     }
   );
 
-  return result;
+  return {
+  startDate: a.start_date,
+  endDate: a.end_date,
+  results: result.results || [],
+};
 },
     },
 
