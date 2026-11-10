@@ -1,9 +1,10 @@
 // MCP tool definitions + dispatch. Each tool maps to one or two Genesys Cloud
 // Platform API calls and returns plain JSON for the model.
 //
-// Scope is deliberate: config reads + create/build actions. NO analytics/KPI
-// tools - see about.js for why. Outbound campaigns and sequences are always
-// created OFF, and no ignition tool ships: a human presses go.
+// Scope is deliberate: configuration reads, create/build actions, and
+// read-only Quality Management evaluation and customer survey analytics.
+// Outbound campaigns and sequences are always created OFF, and no ignition
+// tool ships: a human presses go.
 
 import { GenesysClient, GenesysError, REGIONS, pathId } from './genesys.js';
 import { ABOUT } from './about.js';
@@ -267,6 +268,160 @@ return {
       };
     },
   },
+
+  // ----- customer surveys -----
+  {
+    name: 'list_quality_surveys',
+    description: 'List Genesys Cloud Quality Management survey results for a specified date range.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        start_date: {
+          type: 'string',
+          description: 'Start date in YYYY-MM-DD format',
+        },
+        end_date: {
+          type: 'string',
+          description: 'End date in YYYY-MM-DD format',
+        },
+      },
+      required: ['start_date', 'end_date'],
+      additionalProperties: false,
+    },
+
+    handler: async (gc, a) => {
+      const interval = `${a.start_date}T00:00:00.000Z/${a.end_date}T23:59:59.999Z`;
+
+      const result = await gc.post(
+        '/api/v2/analytics/surveys/aggregates/query',
+        {
+          interval,
+          groupBy: [
+            'surveyFormId',
+            'userId'
+          ],
+          metrics: [
+            'oSurveyTotalScore',
+            'oSurveyQuestionScore',
+            'nSurveysSent',
+            'nSurveysStarted',
+            'nSurveysAbandoned',
+            'nSurveysExpired'
+          ]
+        }
+      );
+
+      return {
+        startDate: a.start_date,
+        endDate: a.end_date,
+        results: result.results || [],
+      };
+    },
+  },
+  {
+    name: 'get_quality_survey',
+    description: 'Get one Genesys Cloud Quality Management survey response by survey ID, including its status, answers, and scoring data.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        survey_id: {
+          type: 'string',
+          description: 'Genesys Cloud survey ID',
+        },
+      },
+      required: ['survey_id'],
+      additionalProperties: false,
+    },
+
+    handler: async (gc, a) => {
+      const surveyId = pathId(
+        'survey id',
+        a.survey_id
+      );
+
+      const survey = await gc.get(
+        `/api/v2/quality/surveys/${surveyId}`
+      );
+
+      return {
+        surveyId,
+        survey,
+      };
+    },
+  },
+
+  {
+    name: 'get_quality_survey_form',
+    description: 'Get a published Genesys Cloud survey form by form ID, including its question groups, questions, question types, answer options, and scoring configuration.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        form_id: {
+          type: 'string',
+          description: 'Genesys Cloud published survey form ID',
+        },
+      },
+      required: ['form_id'],
+      additionalProperties: false,
+    },
+
+    handler: async (gc, a) => {
+      const formId = pathId(
+        'survey form id',
+        a.form_id
+      );
+
+      const form = await gc.get(
+        `/api/v2/quality/publishedforms/surveys/${formId}`
+      );
+
+      return {
+        formId,
+        form,
+      };
+    },
+  },
+
+  {
+    name: 'get_quality_survey_question_scores',
+    description: 'Get the individual answers and scoring data from one Genesys Cloud Quality Management survey response.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        survey_id: {
+          type: 'string',
+          description: 'Genesys Cloud survey ID',
+        },
+      },
+      required: ['survey_id'],
+      additionalProperties: false,
+    },
+
+    handler: async (gc, a) => {
+      const surveyId = pathId(
+        'survey id',
+        a.survey_id
+      );
+
+      const survey = await gc.get(
+        `/api/v2/quality/surveys/${surveyId}`
+      );
+
+      return {
+        surveyId,
+        conversationId: survey.conversationId || null,
+        surveyFormId:
+          survey.surveyForm?.id ||
+          survey.surveyFormId ||
+          survey.formId ||
+          null,
+        status: survey.status || null,
+        answers: survey.answers || null,
+        survey,
+      };
+    },
+  },
+  
   // ----- queues & routing -----
   {
     name: 'list_queues',
@@ -1879,7 +2034,8 @@ export const WRITE_TOOLS = new Set([
 
 export const TOOL_GROUPS = [
   { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
-  { name: 'Quality Management', icon: '📊', tools: ['list_quality_evaluations', 'get_quality_evaluation', 'get_quality_evaluation_form', 'get_quality_conversation', 'get_quality_conversation'] },
+  { name: 'Quality Management', icon: '📊', tools: ['list_quality_evaluations', 'get_quality_evaluation', 'get_quality_evaluation_form', 'get_quality_question_scores', 'get_quality_conversation'] },
+  { name: 'Customer Surveys', icon: '📝', tools: ['list_quality_surveys', 'get_quality_survey', 'get_quality_survey_form', 'get_quality_survey_question_scores'] },
   { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'update_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
   { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'update_user_contact_options', 'set_user_direct_routing_tag'] },
   { name: 'Schedules & Hours', icon: '🕐', tools: ['list_schedules', 'create_schedule', 'create_schedule_group'] },
