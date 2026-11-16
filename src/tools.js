@@ -149,7 +149,11 @@ export const TOOLS = [
           400
         );
       }
+const aiScoringQuestionNumbers =
+  new Set();
 
+let globalQuestionNumber = 0;
+      
       const questionGroups =
         a.question_groups.map(
           (group, groupIndex) => {
@@ -206,7 +210,17 @@ export const TOOLS = [
                       400
                     );
                   }
+globalQuestionNumber++;
 
+if (
+  question.ai_scoring === true ||
+  question.enable_ai_scoring === true ||
+  question.enableAiScoring === true
+) {
+  aiScoringQuestionNumbers.add(
+    globalQuestionNumber
+  );
+}
                 const requestedQuestionType =
   question.type ||
   'multipleChoice';
@@ -396,35 +410,307 @@ if (!questionType) {
         name: formName,
         questionGroups,
       };
+const createdForm =
+  await gc.post(
+    '/api/v2/quality/forms/evaluations',
+    body
+  );
 
-      const createdForm =
-        await gc.post(
-          '/api/v2/quality/forms/evaluations',
-          body
+const formId = pathId(
+  'evaluation form id',
+  createdForm.id
+);
+
+/*
+ * Genesys generates the group/question contextIds
+ * when the draft is created. Retrieve the saved
+ * draft before constructing aiScoring.
+ */
+let savedForm = await gc.get(
+  `/api/v2/quality/forms/evaluations/${formId}`
+);
+
+if (aiScoringQuestionNumbers.size) {
+  const savedQuestionGroups =
+    Array.isArray(
+      savedForm.questionGroups
+    )
+      ? savedForm.questionGroups
+      : [];
+
+  const questionGroupSettings = [];
+
+  let savedQuestionNumber = 0;
+
+  for (
+    let groupIndex = 0;
+    groupIndex <
+      savedQuestionGroups.length;
+    groupIndex++
+  ) {
+    const savedGroup =
+      savedQuestionGroups[groupIndex];
+
+    const groupContextId =
+      savedGroup.contextId ||
+      savedGroup.questionGroupContextId ||
+      null;
+
+    if (!groupContextId) {
+      throw new GenesysError(
+        `Draft form ${formId} was created, but question group ${groupIndex + 1} has no contextId. AI scoring could not be configured.`,
+        502
+      );
+    }
+
+    const savedQuestions =
+      Array.isArray(
+        savedGroup.questions
+      )
+        ? savedGroup.questions
+        : [];
+
+    const questionSettings = [];
+
+    for (
+      let questionIndex = 0;
+      questionIndex <
+        savedQuestions.length;
+      questionIndex++
+    ) {
+      savedQuestionNumber++;
+
+      /*
+       * Questions with AI scoring off are
+       * deliberately omitted from aiScoring,
+       * matching the working Demo form.
+       */
+      if (
+        !aiScoringQuestionNumbers.has(
+          savedQuestionNumber
+        )
+      ) {
+        continue;
+      }
+
+      const savedQuestion =
+        savedQuestions[questionIndex];
+
+      const questionContextId =
+        savedQuestion.contextId ||
+        savedQuestion.questionContextId ||
+        null;
+
+      if (!questionContextId) {
+        throw new GenesysError(
+          `Draft form ${formId} was created, but question ${savedQuestionNumber} has no contextId. AI scoring could not be configured.`,
+          502
         );
+      }
 
-      return {
-        created: true,
-        published: false,
-        formId:
-          createdForm.id || null,
-        name:
-          createdForm.name ||
-          formName,
-        questionGroupCount:
-          questionGroups.length,
-        questionCount:
-          questionGroups.reduce(
-            (total, group) =>
-              total +
-              group.questions.length,
-            0
-          ),
-        form: createdForm,
-        note:
-          'Evaluation form created as an editable draft. It was not published.',
-      };
+      questionSettings.push({
+        questionContextId,
+        settings: {
+          enabled: true,
+        },
+      });
+    }
+
+    /*
+     * Do not send empty group settings.
+     */
+    if (questionSettings.length) {
+      questionGroupSettings.push({
+        questionGroupContextId:
+          groupContextId,
+        questionSettings,
+      });
+    }
+  }
+
+  const updateBody = {
+    ...savedForm,
+    aiScoring: {
+      questionGroupSettings,
     },
+  };
+
+  /*
+   * These are response metadata rather than
+   * editable form fields.
+   */
+  delete updateBody.id;
+  delete updateBody.selfUri;
+  delete updateBody.createdBy;
+  delete updateBody.modifiedBy;
+  delete updateBody.dateCreated;
+  delete updateBody.dateModified;
+
+  await gc.api(
+    'PUT',
+    `/api/v2/quality/forms/evaluations/${formId}`,
+    {
+      body: updateBody,
+    }
+  );
+
+  /*
+   * Read it back so we verify Genesys actually
+   * persisted the AI-scoring configuration.
+   */
+  savedForm = await gc.get(
+    `/api/v2/quality/forms/evaluations/${formId}`
+  );
+}
+
+/*
+ * Collect the contextIds that Genesys says are
+ * actually enabled after the update.
+ */
+const enabledContextIds =
+  new Set();
+
+const savedAiGroups =
+  Array.isArray(
+    savedForm.aiScoring
+      ?.questionGroupSettings
+  )
+    ? savedForm.aiScoring
+        .questionGroupSettings
+    : [];
+
+for (
+  const groupSetting of savedAiGroups
+) {
+  const settings =
+    Array.isArray(
+      groupSetting.questionSettings
+    )
+      ? groupSetting.questionSettings
+      : [];
+
+  for (
+    const questionSetting of settings
+  ) {
+    if (
+      questionSetting
+        ?.settings
+        ?.enabled === true &&
+      questionSetting
+        .questionContextId
+    ) {
+      enabledContextIds.add(
+        questionSetting.questionContextId
+      );
+    }
+  }
+}
+
+/*
+ * Verify every question requested for AI scoring.
+ */
+const verification = [];
+
+let verificationQuestionNumber = 0;
+
+const verificationGroups =
+  Array.isArray(
+    savedForm.questionGroups
+  )
+    ? savedForm.questionGroups
+    : [];
+
+for (
+  const group of verificationGroups
+) {
+  const questions =
+    Array.isArray(group.questions)
+      ? group.questions
+      : [];
+
+  for (const question of questions) {
+    verificationQuestionNumber++;
+
+    const contextId =
+      question.contextId ||
+      question.questionContextId ||
+      null;
+
+    const requested =
+      aiScoringQuestionNumbers.has(
+        verificationQuestionNumber
+      );
+
+    const enabled =
+      contextId
+        ? enabledContextIds.has(
+            contextId
+          )
+        : false;
+
+    verification.push({
+      questionNumber:
+        verificationQuestionNumber,
+      questionText:
+        question.text || null,
+      requestedAiScoring:
+        requested,
+      aiScoringEnabled:
+        enabled,
+    });
+  }
+}
+
+const failedAiScoring =
+  verification.filter(
+    (question) =>
+      question.requestedAiScoring &&
+      !question.aiScoringEnabled
+  );
+
+if (failedAiScoring.length) {
+  throw new GenesysError(
+    `Draft form ${formId} was created, but AI scoring was not saved for question(s): ${failedAiScoring
+      .map(
+        (question) =>
+          question.questionNumber
+      )
+      .join(', ')}.`,
+    502
+  );
+}
+
+return {
+  created: true,
+  published: false,
+  formId,
+  name:
+    savedForm.name ||
+    createdForm.name ||
+    formName,
+  questionGroupCount:
+    questionGroups.length,
+  questionCount:
+    questionGroups.reduce(
+      (total, group) =>
+        total +
+        group.questions.length,
+      0
+    ),
+  aiScoringRequested:
+    aiScoringQuestionNumbers.size,
+  aiScoringEnabled:
+    enabledContextIds.size,
+  aiScoringVerification:
+    verification,
+  form:
+    savedForm,
+  note:
+    aiScoringQuestionNumbers.size
+      ? 'Evaluation form created as an editable draft. AI scoring was configured and verified during the same tool call. The form was not published.'
+      : 'Evaluation form created as an editable draft without AI scoring. The form was not published.',
+};
+      },
   },   
   {
     name: 'list_quality_evaluations',
