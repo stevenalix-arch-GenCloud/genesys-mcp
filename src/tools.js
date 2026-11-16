@@ -485,16 +485,32 @@ if (aiScoringQuestionNumbers.size) {
        * deliberately omitted from aiScoring,
        * matching the working Demo form.
        */
-      if (
-        !aiScoringQuestionNumbers.has(
-          savedQuestionNumber
-        )
-      ) {
-        continue;
-      }
+     const savedQuestion =
+  savedQuestions[questionIndex];
 
-      const savedQuestion =
-        savedQuestions[questionIndex];
+const aiScoringEnabled =
+  aiScoringQuestionNumbers.has(
+    savedQuestionNumber
+  );
+
+if (!aiScoringEnabled) {
+  /*
+   * Genesys treats the missing property as AI
+   * scoring off. Remove it in case the saved
+   * draft already contains the property.
+   */
+  delete savedQuestion
+    .automatedScoringFocus;
+
+  continue;
+}
+
+/*
+ * The Genesys UI writes this property when
+ * AI scoring is enabled for a question.
+ */
+savedQuestion.automatedScoringFocus =
+  'FullInteraction';
 
       const questionContextId =
         savedQuestion.contextId ||
@@ -648,24 +664,36 @@ for (
           )
         : false;
 
-    verification.push({
-      questionNumber:
-        verificationQuestionNumber,
-      questionText:
-        question.text || null,
-      requestedAiScoring:
-        requested,
-      aiScoringEnabled:
-        enabled,
-    });
+  const automatedScoringFocus =
+  question.automatedScoringFocus ||
+  null;
+
+const focusConfigured =
+  automatedScoringFocus ===
+  'FullInteraction';
+
+verification.push({
+  questionNumber:
+    verificationQuestionNumber,
+  questionText:
+    question.text || null,
+  requestedAiScoring:
+    requested,
+  aiScoringEnabled:
+    enabled,
+  automatedScoringFocus,
+  focusConfigured,
+});
   }
 }
-
 const failedAiScoring =
   verification.filter(
     (question) =>
       question.requestedAiScoring &&
-      !question.aiScoringEnabled
+      (
+        !question.aiScoringEnabled ||
+        !question.focusConfigured
+      )
   );
 
 if (failedAiScoring.length) {
