@@ -102,63 +102,7 @@ export const TOOLS = [
     },
   },
   // ----- quality management -----
-    {
-    name: 'create_quality_evaluation_form',
-    description: 'Create a draft Genesys Cloud Quality Management evaluation form with one or more question groups and questions. Supports configurable answer options, weights, N/A answers, required comments, critical questions, fatal/kill questions, and multiple-select questions. The form is created as a draft and is not published.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: {
-          type: 'string',
-          description: 'Name of the evaluation form',
-        },
-        question_groups: {
-          type: 'array',
-          description: 'One or more question groups',
-          minItems: 1,
-          items: {
-            type: 'object',
-            properties: {
-              name: {
-                type: 'string',
-                description: 'Question group name',
-              },
-              weight: {
-                type: 'number',
-                description: 'Question group weight. Defaults to 1.',
-              },
-              manual_weight: {
-                type: 'boolean',
-                description: 'Whether the group weight is set manually. Defaults to true.',
-              },
-              na_enabled: {
-                type: 'boolean',
-                description: 'Whether questions in the group can support N/A answers. Defaults to false.',
-              },
-              default_answers_to_highest: {
-                type: 'boolean',
-                description: 'Default unanswered questions to the highest-scoring answer. Defaults to false.',
-              },
-              default_answers_to_na: {
-                type: 'boolean',
-                description: 'Default unanswered questions to N/A. Defaults to false.',
-              },
-              questions: {
-                type: 'array',
-                description: 'Questions included in this group',
-                minItems: 1,
-                items: {
-                  type: 'object',
-                  properties: {
-                    text: {
-                      type: 'string',
-                      description: 'Question text',
-                    },
-                    help_text: {
-                      type: 'string',
-                      description: 'Optional guidance shown to the 
-  
-  
+   
   {
     name: 'list_quality_evaluations',
     description: 'List completed Genesys Cloud Quality Management evaluations for a specified date range.',
