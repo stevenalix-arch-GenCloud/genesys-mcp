@@ -292,111 +292,288 @@ return {
   },
 
   // ----- customer surveys -----
-    {
-    name: 'create_customer_survey_form',
-    description:
-      'Create a draft Genesys Cloud customer survey form with a variable number of question groups, questions, answer options, help text, explanation prompts, and visibility conditions. Supports multiple-choice, NPS, and free-text customer survey questions. The form is created as a draft and is not published by this tool.',
+   {
+  name: 'create_customer_survey_form',
+  description:
+    'Create a draft Genesys Cloud customer survey form with any number of question groups and questions. Supports multiple-choice, NPS, and free-text questions, including answer options, help text, explanation prompts, N/A settings, and conditional visibility.',
 
-    inputSchema: {
-      type: 'object',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      name: {
+        type: 'string',
+        description: 'Name of the customer survey form.',
+      },
 
-      properties: {
-        name: {
-          type: 'string',
-          description:
-            'Unique name for the customer survey form.',
+      language: {
+        type: 'string',
+        description:
+          'Survey language such as en-US. Defaults to en-US.',
+      },
+
+      header: {
+        type: 'string',
+        description:
+          'Optional introductory text displayed at the beginning of the survey.',
+      },
+
+      footer: {
+        type: 'string',
+        description:
+          'Optional closing text displayed at the end of the survey.',
+      },
+
+      question_groups: {
+        type: 'array',
+        description:
+          'One or more question groups containing the survey questions.',
+        items: {
+          type: 'object',
+          additionalProperties: true,
         },
+      },
+    },
 
-        language: {
-          type: 'string',
-          description:
-            'Survey language, such as en-US. Defaults to en-US.',
-        },
+    required: [
+      'name',
+      'question_groups'
+    ],
 
-        header: {
-          type: 'string',
-          description:
-            'Optional introductory text shown at the beginning of the survey.',
-        },
+    additionalProperties: false,
+  },
 
-        footer: {
-          type: 'string',
-          description:
-            'Optional closing text shown at the end of the survey.',
-        },
+ handler: async (gc, a) => {
+  const name = String(a.name || '').trim();
+  const language = String(a.language || 'en-US').trim();
 
-        avoid_duplicate_name: {
-          type: 'boolean',
-          description:
-            'Check existing survey forms for an exact matching name before creating the form. Defaults to true.',
-        },
+  if (!name) {
+    throw new GenesysError(
+      'Survey form name is required.',
+      400
+    );
+  }
 
-        question_groups: {
-          type: 'array',
-          minItems: 1,
-          description:
-            'One or more groups containing the survey questions.',
+  if (!Array.isArray(a.question_groups) || !a.question_groups.length) {
+    throw new GenesysError(
+      'question_groups must contain at least one question group.',
+      400
+    );
+  }
 
-          items: {
-            type: 'object',
+  const supportedTypes = new Set([
+    'multipleChoiceQuestion',
+    'freeTextQuestion',
+    'npsQuestion',
+  ]);
 
-            properties: {
-              name: {
-                type: 'string',
-                description:
-                  'Name of the question group.',
-              },
+  let questionCount = 0;
 
-              na_enabled: {
-                type: 'boolean',
-                description:
-                  'Allow a not-applicable response for the question group. Defaults to false.',
-              },
+  const questionGroups = a.question_groups.map(
+    (group, groupIndex) => {
+      const groupName = String(
+        group?.name || `Question Group ${groupIndex + 1}`
+      ).trim();
 
-              visibility_condition: {
-                type: 'object',
-                description:
-                  'Optional Genesys visibility condition controlling whether the question group is displayed.',
-                additionalProperties: true,
-              },
+      if (!Array.isArray(group?.questions) || !group.questions.length) {
+        throw new GenesysError(
+          `Question group "${groupName}" must contain at least one question.`,
+          400
+        );
+      }
 
-              questions: {
-                type: 'array',
-                minItems: 1,
-                description:
-                  'Questions contained in this group.',
+      const questions = group.questions.map(
+        (question, questionIndex) => {
+          const location =
+            `Question ${questionIndex + 1} in "${groupName}"`;
 
-                items: {
-                  type: 'object',
+          const text = String(
+            question?.text || ''
+          ).trim();
 
-                  properties: {
-                    text: {
-                      type: 'string',
-                      description:
-                        'Question presented to the customer.',
-                    },
+          const type = String(
+            question?.type || ''
+          ).trim();
 
-                    type: {
-                      type: 'string',
-                      enum: [
-                        'multipleChoiceQuestion',
-                        'freeTextQuestion',
-                        'npsQuestion'
-                      ],
-                      description:
-                        'Genesys customer survey question type.',
-                    },
+          if (!text) {
+            throw new GenesysError(
+              `${location} is missing question text.`,
+              400
+            );
+          }
 
-                    help_text: {
-                      type: 'string',
-                      description:
-                        'Optional customer-facing assistance displayed with the question.',
-                    },
+          if (!supportedTypes.has(type)) {
+            throw new GenesysError(
+              `${location} has unsupported type "${type}". ` +
+              'Supported types are multipleChoiceQuestion, freeTextQuestion, and npsQuestion.',
+              400
+            );
+          }
 
-                    explanation_prompt: {
-                      type: 'string',
-                      description:
-                        'Optional prompt
+          const result = {
+            text,
+            type,
+            helpText:
+              question.help_text !== undefined
+                ? String(question.help_text)
+                : '',
+            explanationPrompt:
+              question.explanation_prompt !== undefined
+                ? String(question.explanation_prompt)
+                : '',
+            naEnabled:
+              question.na_enabled === true,
+          };
+
+          if (type === 'multipleChoiceQuestion') {
+            if (
+              !Array.isArray(question.answer_options) ||
+              question.answer_options.length < 2
+            ) {
+              throw new GenesysError(
+                `${location} is multiple choice and must contain at least two answer_options.`,
+                400
+              );
+            }
+
+            result.answerOptions =
+              question.answer_options.map(
+                (option, optionIndex) => {
+                  const optionText = String(
+                    option?.text || ''
+                  ).trim();
+
+                  if (!optionText) {
+                    throw new GenesysError(
+                      `${location}, answer option ${optionIndex + 1} is missing text.`,
+                      400
+                    );
+                  }
+
+                  const value = Number(option.value);
+
+                  if (!Number.isFinite(value)) {
+                    throw new GenesysError(
+                      `${location}, answer option ${optionIndex + 1} must contain a numeric value.`,
+                      400
+                    );
+                  }
+
+                  return {
+                    text: optionText,
+                    value,
+                  };
+                }
+              );
+          }
+
+          if (type === 'freeTextQuestion') {
+            const maxCharacters =
+              question.max_response_characters === undefined
+                ? 500
+                : Math.floor(
+                    Number(
+                      question.max_response_characters
+                    )
+                  );
+
+            if (
+              !Number.isFinite(maxCharacters) ||
+              maxCharacters < 1 ||
+              maxCharacters > 10000
+            ) {
+              throw new GenesysError(
+                `${location} max_response_characters must be between 1 and 10000.`,
+                400
+              );
+            }
+
+            result.maxResponseCharacters =
+              maxCharacters;
+          }
+
+          if (question.visibility_condition) {
+            result.visibilityCondition =
+              question.visibility_condition;
+          }
+
+          if (
+            question.additional_properties &&
+            typeof question.additional_properties === 'object' &&
+            !Array.isArray(question.additional_properties)
+          ) {
+            Object.assign(
+              result,
+              question.additional_properties
+            );
+          }
+
+          questionCount++;
+
+          return result;
+        }
+      );
+
+      const result = {
+        name: groupName,
+        naEnabled:
+          group.na_enabled === true,
+        questions,
+      };
+
+      if (group.visibility_condition) {
+        result.visibilityCondition =
+          group.visibility_condition;
+      }
+
+      if (
+        group.additional_properties &&
+        typeof group.additional_properties === 'object' &&
+        !Array.isArray(group.additional_properties)
+      ) {
+        Object.assign(
+          result,
+          group.additional_properties
+        );
+      }
+
+      return result;
+    }
+  );
+
+  const body = {
+    name,
+    language,
+    header:
+      a.header !== undefined
+        ? String(a.header)
+        : '',
+    footer:
+      a.footer !== undefined
+        ? String(a.footer)
+        : '',
+    questionGroups,
+  };
+
+  const created = await gc.post(
+    '/api/v2/quality/forms/surveys',
+    body
+  );
+
+  return {
+    created: true,
+    published: false,
+    formId: created.id || null,
+    contextId: created.contextId || null,
+    name: created.name || name,
+    language: created.language || language,
+    questionGroupCount: questionGroups.length,
+    questionCount,
+    form: created,
+    note:
+      'Survey form created as a draft. It has not been published or attached to a survey policy.',
+  };
+},
+}, 
   {
     name: 'list_quality_surveys',
     description: 'List Genesys Cloud Quality Management survey results for a specified date range.',
