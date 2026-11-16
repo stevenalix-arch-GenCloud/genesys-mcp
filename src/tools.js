@@ -102,6 +102,63 @@ export const TOOLS = [
     },
   },
   // ----- quality management -----
+    {
+    name: 'create_quality_evaluation_form',
+    description: 'Create a draft Genesys Cloud Quality Management evaluation form with one or more question groups and questions. Supports configurable answer options, weights, N/A answers, required comments, critical questions, fatal/kill questions, and multiple-select questions. The form is created as a draft and is not published.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Name of the evaluation form',
+        },
+        question_groups: {
+          type: 'array',
+          description: 'One or more question groups',
+          minItems: 1,
+          items: {
+            type: 'object',
+            properties: {
+              name: {
+                type: 'string',
+                description: 'Question group name',
+              },
+              weight: {
+                type: 'number',
+                description: 'Question group weight. Defaults to 1.',
+              },
+              manual_weight: {
+                type: 'boolean',
+                description: 'Whether the group weight is set manually. Defaults to true.',
+              },
+              na_enabled: {
+                type: 'boolean',
+                description: 'Whether questions in the group can support N/A answers. Defaults to false.',
+              },
+              default_answers_to_highest: {
+                type: 'boolean',
+                description: 'Default unanswered questions to the highest-scoring answer. Defaults to false.',
+              },
+              default_answers_to_na: {
+                type: 'boolean',
+                description: 'Default unanswered questions to N/A. Defaults to false.',
+              },
+              questions: {
+                type: 'array',
+                description: 'Questions included in this group',
+                minItems: 1,
+                items: {
+                  type: 'object',
+                  properties: {
+                    text: {
+                      type: 'string',
+                      description: 'Question text',
+                    },
+                    help_text: {
+                      type: 'string',
+                      description: 'Optional guidance shown to the 
+  
+  
   {
     name: 'list_quality_evaluations',
     description: 'List completed Genesys Cloud Quality Management evaluations for a specified date range.',
@@ -4442,7 +4499,7 @@ export async function callTool(cfg, name, args = {}) {
 // UI metadata - which tools are writes, and how they group on the landing page.
 export const WRITE_TOOLS = new Set([
   'create_queue', 'create_user', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'set_user_direct_routing_tag', 'update_user_contact_options',
-  'create_schedule', 'create_schedule_group', 'create_customer_survey_form', 'update_group_users',
+  'create_schedule', 'create_schedule_group', 'create_customer_survey_form', 'update_group_users', 'create_quality_evaluation_form',
   'create_contact_list', 'add_contacts', 'create_attempt_limits',
   'create_callable_time_set', 'create_dnc_list', 'create_campaign',
   'create_campaign_sequence',
@@ -4452,7 +4509,7 @@ export const WRITE_TOOLS = new Set([
 
 export const TOOL_GROUPS = [
   { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
-  { name: 'Quality Management', icon: '📊', tools: ['list_quality_evaluations', 'get_quality_evaluation', 'get_quality_evaluation_form', 'get_quality_question_scores', 'get_quality_conversation'] },
+  { name: 'Quality Management', icon: '📊', tools: ['list_quality_evaluations', 'get_quality_evaluation', 'get_quality_evaluation_form', 'get_quality_question_scores', 'get_quality_conversation', 'create_quality_evaluation_form',] },
   { name: 'Customer Surveys', icon: '📝', tools: ['list_quality_surveys', 'find_quality_survey_responses', 'get_quality_survey', 'get_quality_survey_form', 'get_quality_survey_question_scores', 'create_customer_survey_form',] },
   { name: 'Conversations & Interaction Details', icon: '🔎', tools: ['search_conversations_by_attribute', 'get_conversation_details'] },
   { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'update_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
