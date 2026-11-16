@@ -368,25 +368,27 @@ if (!questionType) {
                 }
               );
 
-            return {
-              name: groupName,
-              weight: groupWeight,
-              manualWeight:
-                group.manual_weight !==
-                false,
-              naEnabled:
-                group.na_enabled ===
-                true,
-              defaultAnswersToHighest:
-                group
-                  .default_answers_to_highest ===
-                true,
-              defaultAnswersToNA:
-                group
-                  .default_answers_to_na ===
-                true,
-              questions,
-            };
+           
+             return {
+  type: 'questionGroup',
+  name: groupName,
+  weight: groupWeight,
+  manualWeight:
+    group.manual_weight !==
+    false,
+  naEnabled:
+    group.na_enabled ===
+    true,
+  defaultAnswersToHighest:
+    group
+      .default_answers_to_highest ===
+    true,
+  defaultAnswersToNA:
+    group
+      .default_answers_to_na ===
+    true,
+  questions,
+};
           }
         );
 
