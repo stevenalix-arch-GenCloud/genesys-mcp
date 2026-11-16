@@ -3313,6 +3313,85 @@ if (a.division) {
       return { valid: true, yaml: specToArchyYaml(a.spec), mermaid: specToMermaid(a.spec), note: 'Render the mermaid for the user and confirm before publish_flow.' };
     },
   },
+    {
+    name: 'get_bot_flow_intents',
+    description:
+      'Get all intents and sample utterances from a Genesys Cloud Architect Bot Flow. The tool exports the Bot Flow as YAML, waits for the export job to finish, downloads the YAML, and extracts the Natural Language Understanding intents and utterances.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        flow: {
+          type: 'string',
+          description:
+            'Genesys Cloud Architect Bot Flow name or id.',
+        },
+        language: {
+          type: 'string',
+          description:
+            'Optional language such as en-us. If omitted, return all languages found in the Bot Flow.',
+        },
+        include_utterances: {
+          type: 'boolean',
+          description:
+            'Include sample utterances with each intent. Defaults to true.',
+        },
+      },
+      required: ['flow'],
+      additionalProperties: false,
+    },
+    handler: async (gc, a) => {
+  const flow = await resolveOne(
+    gc,
+    'Bot Flow',
+    '/api/v2/flows',
+    a.flow
+  );
+
+  const flowDetails = await gc.get(
+    `/api/v2/flows/${flow.id}`
+  );
+
+  const flowType = String(
+    flowDetails.type || ''
+  ).toLowerCase();
+
+  if (
+    flowType !== 'bot' &&
+    flowType !== 'digitalbot'
+  ) {
+    throw new GenesysError(
+      `"${flowDetails.name || a.flow}" is a ${flowDetails.type || 'non-bot'} flow. This tool only supports Architect Bot Flows and Digital Bot Flows.`,
+      400
+    );
+  }
+
+  return {
+    readyForExport: true,
+    flow: {
+      id: flowDetails.id,
+      name: flowDetails.name,
+      type: flowDetails.type,
+      description: flowDetails.description || null,
+      division: flowDetails.division
+        ? {
+            id: flowDetails.division.id,
+            name: flowDetails.division.name,
+          }
+        : null,
+      publishedVersion:
+        flowDetails.publishedVersion?.id || null,
+      checkedInVersion:
+        flowDetails.checkedInVersion?.id || null,
+    },
+    requestedLanguage: a.language || null,
+    includeUtterances:
+      a.include_utterances !== false,
+    note:
+      'The Bot Flow was resolved and validated. The export job has not been started yet.',
+  };
+},
+  },
+  
   {
     name: 'publish_flow',
     description: 'Create AND publish an Architect inbound call flow via the flow-jobs pipeline (validates server-side). Pass the spec from build_flow, or raw Archy YAML (spec OR yaml, not both). CAUTION: if the flow name matches an existing flow of the same type, Genesys UPDATES that flow, so use a fresh name unless an update is explicitly intended. Waits up to ~20s; if the job is still running, poll with get_flow_job.',
@@ -3569,7 +3648,7 @@ export const TOOL_GROUPS = [
   { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'update_user_contact_options', 'set_user_direct_routing_tag'] },
   { name: 'Schedules & Hours', icon: '🕐', tools: ['list_schedules', 'create_schedule', 'create_schedule_group'] },
   { name: 'Outbound (Campaigns & Cadences)', icon: '📤', tools: ['list_contact_lists', 'get_contact_list', 'create_contact_list', 'add_contacts', 'create_attempt_limits', 'create_callable_time_set', 'create_dnc_list', 'list_campaigns', 'get_campaign', 'create_campaign', 'create_campaign_sequence', 'list_outbound_assets', 'render_cadence'] },
-  { name: 'Flows (Architect)', icon: '🌳', tools: ['list_flows', 'get_flow', 'get_flow_configuration', 'list_prompts', 'render_flow', 'export_flow'] },
+  { name: 'Flows (Architect)', icon: '🌳', tools: ['list_flows', 'get_flow', 'get_flow_configuration', 'list_prompts', 'render_flow', 'export_flow', 'get_bot_flow_intents'] },
   { name: 'Flow Builder', icon: '🏗️', tools: ['build_flow', 'publish_flow', 'get_flow_job', 'unlock_flow'] },
   AVA_TOOL_GROUP,
   { name: 'Power', icon: '⚡', tools: ['genesys_api_call'] },
