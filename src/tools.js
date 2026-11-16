@@ -102,7 +102,301 @@ export const TOOLS = [
     },
   },
   // ----- quality management -----
-   
+  {
+    name: 'create_quality_evaluation_form',
+    description: 'Create a draft Genesys Cloud Quality Management evaluation form. Supports multiple question groups, multiple questions, answer options and scoring, N/A, comments-required, critical questions, kill/fatal questions, weights, and multiple-choice or multiple-select questions. Creates the form as a draft and does not publish it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Name of the evaluation form',
+        },
+        question_groups: {
+          type: 'array',
+          description: 'Question groups. Each group should contain name, optional weight/settings, and a questions array. Each question should contain text, optional type/settings, and answer_options with text and numeric value.',
+          items: {
+            type: 'object',
+            additionalProperties: true,
+          },
+        },
+      },
+      required: [
+        'name',
+        'question_groups',
+      ],
+      additionalProperties: false,
+    },
+
+    handler: async (gc, a) => {
+      const formName = String(
+        a.name || ''
+      ).trim();
+
+      if (!formName) {
+        throw new GenesysError(
+          'name is required.',
+          400
+        );
+      }
+
+      if (
+        !Array.isArray(a.question_groups) ||
+        !a.question_groups.length
+      ) {
+        throw new GenesysError(
+          'question_groups must contain at least one question group.',
+          400
+        );
+      }
+
+      const questionGroups =
+        a.question_groups.map(
+          (group, groupIndex) => {
+            const groupName = String(
+              group?.name || ''
+            ).trim();
+
+            if (!groupName) {
+              throw new GenesysError(
+                `Question group ${groupIndex + 1} must have a name.`,
+                400
+              );
+            }
+
+            if (
+              !Array.isArray(group.questions) ||
+              !group.questions.length
+            ) {
+              throw new GenesysError(
+                `Question group "${groupName}" must contain at least one question.`,
+                400
+              );
+            }
+
+            const groupWeight =
+              group.weight === undefined
+                ? 1
+                : Number(group.weight);
+
+            if (
+              !Number.isFinite(groupWeight) ||
+              groupWeight < 0
+            ) {
+              throw new GenesysError(
+                `Question group "${groupName}" weight must be a non-negative number.`,
+                400
+              );
+            }
+
+            const questions =
+              group.questions.map(
+                (
+                  question,
+                  questionIndex
+                ) => {
+                  const questionText =
+                    String(
+                      question?.text || ''
+                    ).trim();
+
+                  if (!questionText) {
+                    throw new GenesysError(
+                      `Question ${questionIndex + 1} in group "${groupName}" must have text.`,
+                      400
+                    );
+                  }
+
+                  const questionType =
+                    question.type ||
+                    'multipleChoice';
+
+                  if (
+                    ![
+                      'multipleChoice',
+                      'multipleSelect',
+                    ].includes(
+                      questionType
+                    )
+                  ) {
+                    throw new GenesysError(
+                      `Question "${questionText}" type must be multipleChoice or multipleSelect.`,
+                      400
+                    );
+                  }
+
+                  if (
+                    !Array.isArray(
+                      question.answer_options
+                    ) ||
+                    question.answer_options
+                      .length < 2
+                  ) {
+                    throw new GenesysError(
+                      `Question "${questionText}" must contain at least two answer options.`,
+                      400
+                    );
+                  }
+
+                  const answerOptions =
+                    question.answer_options.map(
+                      (
+                        answer,
+                        answerIndex
+                      ) => {
+                        const answerText =
+                          String(
+                            answer?.text || ''
+                          ).trim();
+
+                        if (!answerText) {
+                          throw new GenesysError(
+                            `Answer ${answerIndex + 1} for "${questionText}" must have text.`,
+                            400
+                          );
+                        }
+
+                        const answerValue =
+                          Number(
+                            answer.value
+                          );
+
+                        if (
+                          !Number.isFinite(
+                            answerValue
+                          )
+                        ) {
+                          throw new GenesysError(
+                            `Answer "${answerText}" for "${questionText}" must have a numeric value.`,
+                            400
+                          );
+                        }
+
+                        return {
+                          text: answerText,
+                          value: answerValue,
+                        };
+                      }
+                    );
+
+                  const questionBody = {
+                    text: questionText,
+                    type: questionType,
+                    naEnabled:
+                      question.na_enabled ===
+                      true,
+                    commentsRequired:
+                      question.comments_required ===
+                      true,
+                    isCritical:
+                      question.is_critical ===
+                      true,
+                    isKill:
+                      question.is_kill ===
+                      true,
+                    answerOptions,
+                  };
+
+                  if (
+                    question.help_text !==
+                    undefined
+                  ) {
+                    const helpText =
+                      String(
+                        question.help_text
+                      ).trim();
+
+                    if (helpText) {
+                      questionBody.helpText =
+                        helpText;
+                    }
+                  }
+
+                  if (
+                    question.weight !==
+                    undefined
+                  ) {
+                    const questionWeight =
+                      Number(
+                        question.weight
+                      );
+
+                    if (
+                      !Number.isFinite(
+                        questionWeight
+                      ) ||
+                      questionWeight < 0
+                    ) {
+                      throw new GenesysError(
+                        `Question "${questionText}" weight must be a non-negative number.`,
+                        400
+                      );
+                    }
+
+                    questionBody.weight =
+                      questionWeight;
+                  }
+
+                  return questionBody;
+                }
+              );
+
+            return {
+              name: groupName,
+              weight: groupWeight,
+              manualWeight:
+                group.manual_weight !==
+                false,
+              naEnabled:
+                group.na_enabled ===
+                true,
+              defaultAnswersToHighest:
+                group
+                  .default_answers_to_highest ===
+                true,
+              defaultAnswersToNA:
+                group
+                  .default_answers_to_na ===
+                true,
+              questions,
+            };
+          }
+        );
+
+      const body = {
+        name: formName,
+        questionGroups,
+      };
+
+      const createdForm =
+        await gc.post(
+          '/api/v2/quality/forms/evaluations',
+          body
+        );
+
+      return {
+        created: true,
+        published: false,
+        formId:
+          createdForm.id || null,
+        name:
+          createdForm.name ||
+          formName,
+        questionGroupCount:
+          questionGroups.length,
+        questionCount:
+          questionGroups.reduce(
+            (total, group) =>
+              total +
+              group.questions.length,
+            0
+          ),
+        form: createdForm,
+        note:
+          'Evaluation form created as an editable draft. It was not published.',
+      };
+    },
+  },   
   {
     name: 'list_quality_evaluations',
     description: 'List completed Genesys Cloud Quality Management evaluations for a specified date range.',
