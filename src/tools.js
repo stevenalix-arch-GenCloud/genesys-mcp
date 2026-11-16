@@ -292,6 +292,111 @@ return {
   },
 
   // ----- customer surveys -----
+    {
+    name: 'create_customer_survey_form',
+    description:
+      'Create a draft Genesys Cloud customer survey form with a variable number of question groups, questions, answer options, help text, explanation prompts, and visibility conditions. Supports multiple-choice, NPS, and free-text customer survey questions. The form is created as a draft and is not published by this tool.',
+
+    inputSchema: {
+      type: 'object',
+
+      properties: {
+        name: {
+          type: 'string',
+          description:
+            'Unique name for the customer survey form.',
+        },
+
+        language: {
+          type: 'string',
+          description:
+            'Survey language, such as en-US. Defaults to en-US.',
+        },
+
+        header: {
+          type: 'string',
+          description:
+            'Optional introductory text shown at the beginning of the survey.',
+        },
+
+        footer: {
+          type: 'string',
+          description:
+            'Optional closing text shown at the end of the survey.',
+        },
+
+        avoid_duplicate_name: {
+          type: 'boolean',
+          description:
+            'Check existing survey forms for an exact matching name before creating the form. Defaults to true.',
+        },
+
+        question_groups: {
+          type: 'array',
+          minItems: 1,
+          description:
+            'One or more groups containing the survey questions.',
+
+          items: {
+            type: 'object',
+
+            properties: {
+              name: {
+                type: 'string',
+                description:
+                  'Name of the question group.',
+              },
+
+              na_enabled: {
+                type: 'boolean',
+                description:
+                  'Allow a not-applicable response for the question group. Defaults to false.',
+              },
+
+              visibility_condition: {
+                type: 'object',
+                description:
+                  'Optional Genesys visibility condition controlling whether the question group is displayed.',
+                additionalProperties: true,
+              },
+
+              questions: {
+                type: 'array',
+                minItems: 1,
+                description:
+                  'Questions contained in this group.',
+
+                items: {
+                  type: 'object',
+
+                  properties: {
+                    text: {
+                      type: 'string',
+                      description:
+                        'Question presented to the customer.',
+                    },
+
+                    type: {
+                      type: 'string',
+                      enum: [
+                        'multipleChoiceQuestion',
+                        'freeTextQuestion',
+                        'npsQuestion'
+                      ],
+                      description:
+                        'Genesys customer survey question type.',
+                    },
+
+                    help_text: {
+                      type: 'string',
+                      description:
+                        'Optional customer-facing assistance displayed with the question.',
+                    },
+
+                    explanation_prompt: {
+                      type: 'string',
+                      description:
+                        'Optional prompt
   {
     name: 'list_quality_surveys',
     description: 'List Genesys Cloud Quality Management survey results for a specified date range.',
@@ -3631,7 +3736,7 @@ export async function callTool(cfg, name, args = {}) {
 // UI metadata - which tools are writes, and how they group on the landing page.
 export const WRITE_TOOLS = new Set([
   'create_queue', 'create_user', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'set_user_direct_routing_tag', 'update_user_contact_options',
-  'create_schedule', 'create_schedule_group',
+  'create_schedule', 'create_schedule_group', 'create_customer_survey_form',
   'create_contact_list', 'add_contacts', 'create_attempt_limits',
   'create_callable_time_set', 'create_dnc_list', 'create_campaign',
   'create_campaign_sequence',
@@ -3642,7 +3747,7 @@ export const WRITE_TOOLS = new Set([
 export const TOOL_GROUPS = [
   { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
   { name: 'Quality Management', icon: '📊', tools: ['list_quality_evaluations', 'get_quality_evaluation', 'get_quality_evaluation_form', 'get_quality_question_scores', 'get_quality_conversation'] },
-  { name: 'Customer Surveys', icon: '📝', tools: ['list_quality_surveys', 'find_quality_survey_responses', 'get_quality_survey', 'get_quality_survey_form', 'get_quality_survey_question_scores'] },
+  { name: 'Customer Surveys', icon: '📝', tools: ['list_quality_surveys', 'find_quality_survey_responses', 'get_quality_survey', 'get_quality_survey_form', 'get_quality_survey_question_scores', 'create_customer_survey_form',] },
   { name: 'Conversations & Interaction Details', icon: '🔎', tools: ['search_conversations_by_attribute', 'get_conversation_details'] },
   { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'update_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
   { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'update_user_contact_options', 'set_user_direct_routing_tag'] },
