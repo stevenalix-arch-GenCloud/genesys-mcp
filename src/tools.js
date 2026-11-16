@@ -207,23 +207,50 @@ export const TOOLS = [
                     );
                   }
 
-                  const questionType =
-                    question.type ||
-                    'multipleChoice';
+                const requestedQuestionType =
+  question.type ||
+  'multipleChoice';
 
-                  if (
-                    ![
-                      'multipleChoice',
-                      'multipleSelect',
-                    ].includes(
-                      questionType
-                    )
-                  ) {
-                    throw new GenesysError(
-                      `Question "${questionText}" type must be multipleChoice or multipleSelect.`,
-                      400
-                    );
-                  }
+const questionTypeMap = {
+  multipleChoice:
+    'multipleChoiceQuestion',
+  multipleChoiceQuestion:
+    'multipleChoiceQuestion',
+
+  multipleSelect:
+    'multipleSelectQuestion',
+  multipleSelectQuestion:
+    'multipleSelectQuestion',
+
+  freeText:
+    'freeTextQuestion',
+  freeTextQuestion:
+    'freeTextQuestion',
+
+  nps:
+    'npsQuestion',
+  npsQuestion:
+    'npsQuestion',
+
+  readOnlyTextBlock:
+    'readOnlyTextBlockQuestion',
+  readOnlyTextBlockQuestion:
+    'readOnlyTextBlockQuestion',
+};
+
+const questionType =
+  questionTypeMap[
+    requestedQuestionType
+  ];
+
+if (!questionType) {
+  throw new GenesysError(
+    `Question "${questionText}" has unsupported type "${requestedQuestionType}". ` +
+    'Use multipleChoice, multipleSelect, freeText, nps, readOnlyTextBlock, ' +
+    'or the corresponding native Genesys QuestionType value.',
+    400
+  );
+}
 
                   if (
                     !Array.isArray(
