@@ -3039,6 +3039,535 @@ if (a.division) {
     };
   },
 },
+
+    {
+    name: 'update_group_users',
+    description: 'Add or remove owners and members of an existing Genesys Cloud group. Only the requested changes are made. Users added as owners are automatically added as members first. Users removed as both owners and members are removed as owners first.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        group: {
+          type: 'string',
+          description: 'Genesys Cloud group name or id',
+        },
+        add_owners: {
+          type: 'array',
+          items: {
+            type: 'string',
+          },
+          description: 'Users to add as group owners, specified by name, email, or id',
+        },
+        remove_owners: {
+          type: 'array',
+          items: {
+            type: 'string',
+          },
+          description: 'Users to remove as group owners, specified by name, email, or id',
+        },
+        add_members: {
+          type: 'array',
+          items: {
+            type: 'string',
+          },
+          description: 'Users to add as group members, specified by name, email, or id',
+        },
+        remove_members: {
+          type: 'array',
+          items: {
+            type: 'string',
+          },
+          description: 'Users to remove as group members, specified by name, email, or id',
+        },
+      },
+      required: ['group'],
+      additionalProperties: false,
+    },
+
+    handler: async (gc, a) => {
+      const addOwnerRefs = Array.isArray(
+        a.add_owners
+      )
+        ? a.add_owners
+        : [];
+
+      const removeOwnerRefs = Array.isArray(
+        a.remove_owners
+      )
+        ? a.remove_owners
+        : [];
+
+      const addMemberRefs = Array.isArray(
+        a.add_members
+      )
+        ? a.add_members
+        : [];
+
+      const removeMemberRefs = Array.isArray(
+        a.remove_members
+      )
+        ? a.remove_members
+        : [];
+
+      if (
+        !addOwnerRefs.length &&
+        !removeOwnerRefs.length &&
+        !addMemberRefs.length &&
+        !removeMemberRefs.length
+      ) {
+        throw new GenesysError(
+          'Provide at least one user in add_owners, remove_owners, add_members, or remove_members.',
+          400
+        );
+      }
+
+      const groupRef = await resolveOne(
+        gc,
+        'group',
+        '/api/v2/groups',
+        a.group
+      );
+
+      const groupId = pathId(
+        'group id',
+        groupRef.id
+      );
+
+      const group = await gc.get(
+        `/api/v2/groups/${groupId}`
+      );
+
+      async function resolveUsers(refs) {
+        const users = [];
+
+        for (const ref of refs) {
+          users.push(
+            await resolveUser(gc, ref)
+          );
+        }
+
+        return [
+          ...new Map(
+            users.map((user) => [
+              user.id,
+              user,
+            ])
+          ).values(),
+        ];
+      }
+
+      const [
+        addOwners,
+        removeOwners,
+        addMembers,
+        removeMembers,
+      ] = await Promise.all([
+        resolveUsers(addOwnerRefs),
+        resolveUsers(removeOwnerRefs),
+        resolveUsers(addMemberRefs),
+        resolveUsers(removeMemberRefs),
+      ]);
+
+      const addOwnerIds = new Set(
+        addOwners.map((user) => user.id)
+      );
+
+      const removeOwnerIds = new Set(
+        removeOwners.map((user) => user.id)
+      );
+
+      const addMemberIds = new Set(
+        addMembers.map((user) => user.id)
+      );
+
+      const removeMemberIds = new Set(
+        removeMembers.map(
+          (user) => user.id
+        )
+      );
+
+      function overlappingIds(
+        first,
+        second
+      ) {
+        return [...first].filter((id) =>
+          second.has(id)
+        );
+      }
+
+      const ownerConflicts =
+        overlappingIds(
+          addOwnerIds,
+          removeOwnerIds
+        );
+
+      if (ownerConflicts.length) {
+        throw new GenesysError(
+          'The same user cannot appear in both add_owners and remove_owners.',
+          400
+        );
+      }
+
+      const memberConflicts =
+        overlappingIds(
+          addMemberIds,
+          removeMemberIds
+        );
+
+      if (memberConflicts.length) {
+        throw new GenesysError(
+          'The same user cannot appear in both add_members and remove_members.',
+          400
+        );
+      }
+
+      const addOwnerRemoveMemberConflicts =
+        overlappingIds(
+          addOwnerIds,
+          removeMemberIds
+        );
+
+      if (
+        addOwnerRemoveMemberConflicts.length
+      ) {
+        throw new GenesysError(
+          'A user cannot be added as an owner and removed as a member in the same request.',
+          400
+        );
+      }
+
+const currentOwnerIds = new Set(
+  (group.owners || [])
+    .map(
+      (owner) =>
+        owner.id ||
+        owner.userId
+    )
+    .filter(Boolean)
+);
+
+const currentMembersResult =
+  await gc.listAll(
+    `/api/v2/groups/${groupId}/members`
+  );
+
+const currentMembers =
+  Array.isArray(
+    currentMembersResult.entities
+  )
+    ? currentMembersResult.entities
+    : [];
+
+const currentMemberIds = new Set(
+  currentMembers
+          .map(
+            (member) =>
+              member.id ||
+              member.userId
+          )
+          .filter(Boolean)
+      );
+
+      /*
+       * Owners must also be group members.
+       * Add requested owners to the membership set first.
+       */
+      const membershipIdsToAdd =
+        new Set([
+          ...addMemberIds,
+          ...addOwnerIds,
+        ]);
+
+      const actualMemberIdsToAdd = [
+        ...membershipIdsToAdd,
+      ].filter(
+        (id) =>
+          !currentMemberIds.has(id)
+      );
+
+      const desiredOwnerIds =
+        new Set(currentOwnerIds);
+
+      for (const id of addOwnerIds) {
+        desiredOwnerIds.add(id);
+      }
+
+      for (const id of removeOwnerIds) {
+        desiredOwnerIds.delete(id);
+      }
+
+      if (
+        currentOwnerIds.size > 0 &&
+        desiredOwnerIds.size === 0
+      ) {
+        throw new GenesysError(
+          'This request would remove every owner from the group. Add or retain at least one owner.',
+          400
+        );
+      }
+
+      /*
+       * A current or newly added owner cannot be removed
+       * from group membership unless ownership is also
+       * removed in this request.
+       */
+      const invalidOwnerMemberRemovals = [
+        ...removeMemberIds,
+      ].filter(
+        (id) =>
+          desiredOwnerIds.has(id)
+      );
+
+      if (
+        invalidOwnerMemberRemovals.length
+      ) {
+        throw new GenesysError(
+          'A group owner cannot be removed from membership while remaining an owner. Put the user in remove_owners as well.',
+          400
+        );
+      }
+
+      const actualMemberIdsToRemove = [
+        ...removeMemberIds,
+      ].filter((id) =>
+        currentMemberIds.has(id)
+      );
+
+      const addedMembers = [];
+      const removedMembers = [];
+      const addedOwners = [];
+      const removedOwners = [];
+      const unchanged = [];
+
+      function userResult(user) {
+        return {
+          id: user.id,
+          name: user.name || null,
+          email: user.email || null,
+        };
+      }
+
+      /*
+       * Step 1:
+       * Add required memberships before adding ownership.
+       */
+      if (actualMemberIdsToAdd.length) {
+        await gc.post(
+          `/api/v2/groups/${groupId}/members`,
+          {
+            memberIds:
+              actualMemberIdsToAdd,
+          }
+        );
+
+        for (const user of [
+          ...addMembers,
+          ...addOwners,
+        ]) {
+          if (
+            actualMemberIdsToAdd.includes(
+              user.id
+            ) &&
+            !addedMembers.some(
+              (item) =>
+                item.id === user.id
+            )
+          ) {
+            addedMembers.push(
+              userResult(user)
+            );
+          }
+        }
+      }
+
+      for (const user of addMembers) {
+        if (
+          currentMemberIds.has(user.id)
+        ) {
+          unchanged.push({
+            ...userResult(user),
+            role: 'member',
+            reason:
+              'User was already a group member.',
+          });
+        }
+      }
+
+      /*
+       * Step 2:
+       * Update the complete owner set while preserving
+       * the rest of the group configuration.
+       */
+      const ownersChanged =
+        [...desiredOwnerIds].some(
+          (id) =>
+            !currentOwnerIds.has(id)
+        ) ||
+        [...currentOwnerIds].some(
+          (id) =>
+            !desiredOwnerIds.has(id)
+        );
+
+      if (ownersChanged) {
+        const updateBody = {
+          name: group.name,
+          ownerIds: [
+            ...desiredOwnerIds,
+          ],
+        };
+
+        if (
+          group.state !== undefined
+        ) {
+          updateBody.state =
+            group.state;
+        }
+
+        if (
+          group.rules !== undefined
+        ) {
+          updateBody.rules =
+            group.rules;
+        }
+
+        if (
+          group.type !== undefined
+        ) {
+          updateBody.type =
+            group.type;
+        }
+
+       await gc.api(
+  'PUT',
+  `/api/v2/groups/${groupId}`,
+  {
+    body: updateBody,
+  }
+);
+      }
+
+      for (const user of addOwners) {
+        if (
+          !currentOwnerIds.has(user.id)
+        ) {
+          addedOwners.push(
+            userResult(user)
+          );
+        } else {
+          unchanged.push({
+            ...userResult(user),
+            role: 'owner',
+            reason:
+              'User was already a group owner.',
+          });
+        }
+      }
+
+      for (
+        const user of removeOwners
+      ) {
+        if (
+          currentOwnerIds.has(user.id)
+        ) {
+          removedOwners.push(
+            userResult(user)
+          );
+        } else {
+          unchanged.push({
+            ...userResult(user),
+            role: 'owner',
+            reason:
+              'User was not a group owner.',
+          });
+        }
+      }
+
+      /*
+       * Step 3:
+       * Remove memberships only after ownership has
+       * been removed.
+       */
+      if (
+        actualMemberIdsToRemove.length
+      ) {
+        await gc.api(
+          'DELETE',
+          `/api/v2/groups/${groupId}/members`,
+          {
+            query: {
+              ids:
+                actualMemberIdsToRemove.join(
+                  ','
+                ),
+            },
+          }
+        );
+
+        for (
+          const user of removeMembers
+        ) {
+          if (
+            actualMemberIdsToRemove.includes(
+              user.id
+            )
+          ) {
+            removedMembers.push(
+              userResult(user)
+            );
+          }
+        }
+      }
+
+      for (
+        const user of removeMembers
+      ) {
+        if (
+          !currentMemberIds.has(user.id)
+        ) {
+          unchanged.push({
+            ...userResult(user),
+            role: 'member',
+            reason:
+              'User was not a group member.',
+          });
+        }
+      }
+
+      /*
+       * Verify the saved group configuration.
+       */
+      const updatedGroup = await gc.get(
+        `/api/v2/groups/${groupId}`
+      );
+
+      const finalOwnerIds = (
+        updatedGroup.owners || []
+      )
+        .map(
+          (owner) =>
+            owner.id ||
+            owner.userId
+        )
+        .filter(Boolean);
+
+      return {
+        updated: true,
+        group:
+          updatedGroup.name ||
+          group.name ||
+          groupId,
+        groupId,
+        addedOwners,
+        removedOwners,
+        addedMembers,
+        removedMembers,
+        unchanged,
+        finalOwnerIds,
+        note:
+          'Only the requested owner and membership changes were made. Users added as owners were added as members first. Users removed as both owners and members were removed as owners first.',
+      };
+    },
+  },
+  
   // ----- flows (Architect) -----
   {
     name: 'list_flows',
@@ -3913,7 +4442,7 @@ export async function callTool(cfg, name, args = {}) {
 // UI metadata - which tools are writes, and how they group on the landing page.
 export const WRITE_TOOLS = new Set([
   'create_queue', 'create_user', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'set_user_direct_routing_tag', 'update_user_contact_options',
-  'create_schedule', 'create_schedule_group', 'create_customer_survey_form',
+  'create_schedule', 'create_schedule_group', 'create_customer_survey_form', 'update_group_users',
   'create_contact_list', 'add_contacts', 'create_attempt_limits',
   'create_callable_time_set', 'create_dnc_list', 'create_campaign',
   'create_campaign_sequence',
@@ -3928,6 +4457,7 @@ export const TOOL_GROUPS = [
   { name: 'Conversations & Interaction Details', icon: '🔎', tools: ['search_conversations_by_attribute', 'get_conversation_details'] },
   { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'update_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
   { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'update_user_contact_options', 'set_user_direct_routing_tag'] },
+  { name: 'Groups', icon: '👨‍👩‍👧‍👦', tools: ['update_group_users'] },
   { name: 'Schedules & Hours', icon: '🕐', tools: ['list_schedules', 'create_schedule', 'create_schedule_group'] },
   { name: 'Outbound (Campaigns & Cadences)', icon: '📤', tools: ['list_contact_lists', 'get_contact_list', 'create_contact_list', 'add_contacts', 'create_attempt_limits', 'create_callable_time_set', 'create_dnc_list', 'list_campaigns', 'get_campaign', 'create_campaign', 'create_campaign_sequence', 'list_outbound_assets', 'render_cadence'] },
   { name: 'Flows (Architect)', icon: '🌳', tools: ['list_flows', 'get_flow', 'get_flow_configuration', 'list_prompts', 'render_flow', 'export_flow', 'get_bot_flow_intents'] },
