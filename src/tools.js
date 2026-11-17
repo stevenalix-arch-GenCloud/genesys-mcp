@@ -4138,6 +4138,1457 @@ if (conversations.length < pageSize) {
       };
     },
   },
+   {
+    name: 'find_repeat_contacts',
+    description: 'Find repeat Genesys Cloud voice contacts over a date range. When ANI is omitted, the tool discovers repeat callers automatically by extracting and normalizing customer-side ANI values from all interactions. When ANI is supplied, the tool finds interactions for that caller. Results are grouped into repeat-contact episodes using a configurable time window and ranked by contact frequency, episode duration, and recency.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        start_date: {
+          type: 'string',
+          description:
+            'Start date in YYYY-MM-DD format',
+        },
+        end_date: {
+          type: 'string',
+          description:
+            'End date in YYYY-MM-DD format. The inclusive range cannot exceed 7 calendar days.',
+        },
+        ani: {
+          type: 'string',
+          description:
+            'Optional caller ANI. When omitted, the tool discovers repeat callers automatically.',
+        },
+        minimum_contacts: {
+          type: 'number',
+          description:
+            'Minimum contacts required in a repeat-contact episode. Defaults to 2.',
+        },
+        repeat_window_hours: {
+          type: 'number',
+          description:
+            'Maximum elapsed time between consecutive contacts in the same repeat episode. Defaults to 72 hours.',
+        },
+        direction: {
+          type: 'string',
+          enum: [
+            'inbound',
+            'outbound',
+            'any'
+          ],
+          description:
+            'Conversation direction filter. Defaults to inbound.',
+        },
+        page_size: {
+          type: 'number',
+          description:
+            'Conversations per analytics page, from 1 to 100. Defaults to 100.',
+        },
+        max_pages: {
+          type: 'number',
+          description:
+            'Maximum analytics pages to inspect, from 1 to 50. Defaults to 50.',
+        },
+        max_results: {
+          type: 'number',
+          description:
+            'Maximum callers returned, from 1 to 100. Defaults to 25.',
+        },
+        include_nonrepeat_contacts: {
+          type: 'boolean',
+          description:
+            'When a specific ANI is supplied, include all contacts even when they do not form a qualifying repeat episode. Defaults to true.',
+        },
+      },
+      required: [
+        'start_date',
+        'end_date'
+      ],
+      additionalProperties: false,
+    },
+
+    handler: async (gc, a) => {
+      const datePattern =
+        /^\d{4}-\d{2}-\d{2}$/;
+
+      if (
+        !datePattern.test(
+          a.start_date
+        ) ||
+        !datePattern.test(
+          a.end_date
+        )
+      ) {
+        throw new GenesysError(
+          'start_date and end_date must use YYYY-MM-DD format.',
+          400
+        );
+      }
+
+      const startDate = new Date(
+        `${a.start_date}T00:00:00.000Z`
+      );
+
+      const endDate = new Date(
+        `${a.end_date}T00:00:00.000Z`
+      );
+
+      if (
+        Number.isNaN(
+          startDate.getTime()
+        ) ||
+        Number.isNaN(
+          endDate.getTime()
+        )
+      ) {
+        throw new GenesysError(
+          'start_date or end_date is not a valid date.',
+          400
+        );
+      }
+
+      if (endDate < startDate) {
+        throw new GenesysError(
+          'end_date must be on or after start_date.',
+          400
+        );
+      }
+
+      const calendarDays =
+        Math.floor(
+          (
+            endDate.getTime() -
+            startDate.getTime()
+          ) /
+          86400000
+        ) + 1;
+
+      if (calendarDays > 7) {
+        throw new GenesysError(
+          'The date range cannot exceed 7 calendar days. Divide larger searches into smaller requests.',
+          400
+        );
+      }
+
+      const minimumContacts =
+        Math.max(
+          2,
+          Math.min(
+            100,
+            Math.floor(
+              Number(
+                a.minimum_contacts
+              ) || 2
+            )
+          )
+        );
+
+      const repeatWindowHours =
+        Math.max(
+          0.25,
+          Math.min(
+            24 * 30,
+            Number(
+              a.repeat_window_hours
+            ) || 72
+          )
+        );
+
+      const repeatWindowMs =
+        repeatWindowHours *
+        60 *
+        60 *
+        1000;
+
+      const direction =
+        a.direction || 'inbound';
+
+      const pageSize =
+        Math.max(
+          1,
+          Math.min(
+            100,
+            Math.floor(
+              Number(
+                a.page_size
+              ) || 100
+            )
+          )
+        );
+
+      const maxPages =
+        Math.max(
+          1,
+          Math.min(
+            50,
+            Math.floor(
+              Number(
+                a.max_pages
+              ) || 50
+            )
+          )
+        );
+
+      const maxResults =
+        Math.max(
+          1,
+          Math.min(
+            100,
+            Math.floor(
+              Number(
+                a.max_results
+              ) || 25
+            )
+          )
+        );
+
+      const includeNonrepeatContacts =
+        a.include_nonrepeat_contacts !==
+        false;
+
+      const interval =
+        `${a.start_date}T00:00:00.000Z/` +
+        `${a.end_date}T23:59:59.999Z`;
+
+      /*
+       * Normalize ANI while avoiding assumptions
+       * about international country codes.
+       */
+      function normalizeAni(
+        value
+      ) {
+        if (
+          value === undefined ||
+          value === null
+        ) {
+          return null;
+        }
+
+        let text = String(value)
+          .trim()
+          .toLowerCase();
+
+        if (!text) {
+          return null;
+        }
+
+        text = text.replace(
+          /^(tel:|sip:)/i,
+          ''
+        );
+
+        /*
+         * SIP addresses can contain a phone
+         * number before the @ character.
+         */
+        if (
+          text.includes('@')
+        ) {
+          text =
+            text.split('@')[0];
+        }
+
+        /*
+         * Remove URI parameters.
+         */
+        text =
+          text.split(';')[0];
+
+        const hadLeadingPlus =
+          text.startsWith('+');
+
+        const digits =
+          text.replace(
+            /\D/g,
+            ''
+          );
+
+        if (!digits) {
+          return null;
+        }
+
+        /*
+         * Normalize North American 10-digit and
+         * 11-digit numbers into +1 E.164 form.
+         */
+        if (
+          digits.length === 10
+        ) {
+          return `+1${digits}`;
+        }
+
+        if (
+          digits.length === 11 &&
+          digits.startsWith('1')
+        ) {
+          return `+${digits}`;
+        }
+
+        /*
+         * Preserve international numbers with
+         * an explicit leading +.
+         */
+        if (hadLeadingPlus) {
+          return `+${digits}`;
+        }
+
+        /*
+         * Do not infer a missing country code for
+         * non-North-American lengths.
+         */
+        return digits;
+      }
+
+      function timestampMs(
+        value
+      ) {
+        if (!value) {
+          return null;
+        }
+
+        const result =
+          new Date(value).getTime();
+
+        return Number.isFinite(
+          result
+        )
+          ? result
+          : null;
+      }
+
+      function hoursBetween(
+        start,
+        end
+      ) {
+        const startMs =
+          timestampMs(start);
+
+        const endMs =
+          timestampMs(end);
+
+        if (
+          startMs === null ||
+          endMs === null ||
+          endMs < startMs
+        ) {
+          return null;
+        }
+
+        return Number(
+          (
+            (
+              endMs -
+              startMs
+            ) /
+            3600000
+          ).toFixed(2)
+        );
+      }
+
+      function sessionsFor(
+        participant
+      ) {
+        return Array.isArray(
+          participant?.sessions
+        )
+          ? participant.sessions
+          : [];
+      }
+
+      function segmentsFor(
+        participant
+      ) {
+        return sessionsFor(
+          participant
+        ).flatMap(
+          (session) =>
+            Array.isArray(
+              session.segments
+            )
+              ? session.segments.map(
+                  (segment) => ({
+                    session,
+                    segment,
+                  })
+                )
+              : []
+        );
+      }
+
+      function purposeOf(
+        participant
+      ) {
+        return String(
+          participant?.purpose ||
+          ''
+        ).toLowerCase();
+      }
+
+      function directionMatches(
+        conversation,
+        participants
+      ) {
+        if (
+          direction === 'any'
+        ) {
+          return true;
+        }
+
+        const directions =
+          participants.flatMap(
+            (participant) =>
+              sessionsFor(
+                participant
+              )
+                .map(
+                  (session) =>
+                    String(
+                      session.direction ||
+                      ''
+                    ).toLowerCase()
+                )
+                .filter(Boolean)
+          );
+
+        const conversationDirection =
+          String(
+            conversation.direction ||
+            conversation
+              .originatingDirection ||
+            ''
+          ).toLowerCase();
+
+        return (
+          directions.includes(
+            direction
+          ) ||
+          conversationDirection ===
+            direction
+        );
+      }
+
+      /*
+       * Prefer ANI from the customer/external
+       * participant rather than another participant.
+       */
+      function extractCustomerAni(
+        conversation
+      ) {
+        const participants =
+          Array.isArray(
+            conversation.participants
+          )
+            ? conversation.participants
+            : [];
+
+        const customers =
+          participants.filter(
+            (participant) => {
+              const purpose =
+                purposeOf(
+                  participant
+                );
+
+              return (
+                purpose ===
+                  'customer' ||
+                purpose ===
+                  'external'
+              );
+            }
+          );
+
+        for (
+          const participant of
+            customers
+        ) {
+          const candidates = [
+            participant.ani,
+            participant.address,
+            participant
+              .externalAddress,
+            ...sessionsFor(
+              participant
+            ).flatMap(
+              (session) => [
+                session.ani,
+                session.address,
+                session
+                  .remoteNameDisplayable,
+              ]
+            ),
+          ];
+
+          for (
+            const candidate of
+              candidates
+          ) {
+            const normalized =
+              normalizeAni(
+                candidate
+              );
+
+            if (normalized) {
+              return {
+                normalizedAni:
+                  normalized,
+                originalAni:
+                  candidate,
+                participantId:
+                  participant
+                    .participantId ||
+                  participant.id ||
+                  null,
+                participantName:
+                  participant
+                    .participantName ||
+                  participant.name ||
+                  null,
+                externalContactId:
+                  participant
+                    .externalContactId ||
+                  participant
+                    .externalContact
+                    ?.id ||
+                  null,
+              };
+            }
+          }
+        }
+
+        /*
+         * Fall back to conversation-level ANI only
+         * when customer-participant ANI is absent.
+         */
+        const fallbackCandidates = [
+          conversation.ani,
+          conversation
+            .externalAddress,
+        ];
+
+        for (
+          const candidate of
+            fallbackCandidates
+        ) {
+          const normalized =
+            normalizeAni(
+              candidate
+            );
+
+          if (normalized) {
+            return {
+              normalizedAni:
+                normalized,
+              originalAni:
+                candidate,
+              participantId:
+                null,
+              participantName:
+                null,
+              externalContactId:
+                null,
+            };
+          }
+        }
+
+        return null;
+      }
+
+      function uniqueObjectsById(
+        items
+      ) {
+        return [
+          ...new Map(
+            items
+              .filter(
+                (item) =>
+                  item?.id
+              )
+              .map(
+                (item) => [
+                  item.id,
+                  item,
+                ]
+              )
+          ).values(),
+        ];
+      }
+
+      const requestedAni =
+        a.ani !== undefined &&
+        a.ani !== null &&
+        String(a.ani).trim()
+          ? normalizeAni(
+              a.ani
+            )
+          : null;
+
+      if (
+        a.ani !== undefined &&
+        a.ani !== null &&
+        String(a.ani).trim() &&
+        !requestedAni
+      ) {
+        throw new GenesysError(
+          'ani could not be normalized into a usable phone-number value.',
+          400
+        );
+      }
+
+      const contactsByAni =
+        new Map();
+
+      let pagesProcessed = 0;
+      let conversationsProcessed =
+        0;
+      let voiceConversationsProcessed =
+        0;
+      let conversationsWithoutAni = 0;
+      let reachedLastPage = false;
+      let reportedTotalHits = null;
+
+      for (
+        let pageNumber = 1;
+        pageNumber <= maxPages;
+        pageNumber++
+      ) {
+        const result =
+          await gc.post(
+            '/api/v2/analytics/conversations/details/query',
+            {
+              interval,
+              order: 'asc',
+              orderBy:
+                'conversationStart',
+              paging: {
+                pageSize,
+                pageNumber,
+              },
+            }
+          );
+
+        if (
+          typeof result
+            .totalHits ===
+            'number' &&
+          Number.isFinite(
+            result.totalHits
+          )
+        ) {
+          reportedTotalHits =
+            result.totalHits;
+        }
+
+        const conversations =
+          Array.isArray(
+            result.conversations
+          )
+            ? result.conversations
+            : [];
+
+        if (
+          !conversations.length
+        ) {
+          reachedLastPage = true;
+          break;
+        }
+
+        pagesProcessed++;
+        conversationsProcessed +=
+          conversations.length;
+
+        for (
+          const conversation of
+            conversations
+        ) {
+          const participants =
+            Array.isArray(
+              conversation.participants
+            )
+              ? conversation.participants
+              : [];
+
+          if (
+            !directionMatches(
+              conversation,
+              participants
+            )
+          ) {
+            continue;
+          }
+
+          const mediaTypes = [
+            ...new Set(
+              participants.flatMap(
+                (participant) =>
+                  sessionsFor(
+                    participant
+                  )
+                    .map(
+                      (session) =>
+                        String(
+                          session.mediaType ||
+                          ''
+                        ).toLowerCase()
+                    )
+                    .filter(Boolean)
+              )
+            ),
+          ];
+
+          if (
+            !mediaTypes.includes(
+              'voice'
+            )
+          ) {
+            continue;
+          }
+
+          voiceConversationsProcessed++;
+
+          const caller =
+            extractCustomerAni(
+              conversation
+            );
+
+          if (!caller) {
+            conversationsWithoutAni++;
+            continue;
+          }
+
+          if (
+            requestedAni &&
+            caller.normalizedAni !==
+              requestedAni
+          ) {
+            continue;
+          }
+
+          const conversationId =
+            conversation
+              .conversationId ||
+            conversation.id ||
+            null;
+
+          if (!conversationId) {
+            continue;
+          }
+
+          const allSegments =
+            participants.flatMap(
+              (participant) =>
+                segmentsFor(
+                  participant
+                ).map(
+                  ({
+                    session,
+                    segment,
+                  }) => ({
+                    participant,
+                    session,
+                    segment,
+                  })
+                )
+            );
+
+          const queues =
+            uniqueObjectsById(
+              allSegments
+                .filter(
+                  ({
+                    segment,
+                  }) =>
+                    segment.queueId
+                )
+                .map(
+                  ({
+                    segment,
+                  }) => ({
+                    id:
+                      segment.queueId,
+                    name:
+                      segment
+                        .queueName ||
+                      null,
+                  })
+                )
+            );
+
+          const agents =
+            uniqueObjectsById(
+              participants
+                .filter(
+                  (participant) =>
+                    purposeOf(
+                      participant
+                    ) === 'agent'
+                )
+                .map(
+                  (participant) => ({
+                    id:
+                      participant
+                        .userId ||
+                      participant
+                        .user?.id ||
+                      participant
+                        .participantId ||
+                      null,
+                    name:
+                      participant
+                        .participantName ||
+                      participant.name ||
+                      null,
+                  })
+                )
+            );
+
+          const wrapUpCodes =
+            uniqueObjectsById(
+              allSegments
+                .filter(
+                  ({
+                    segment,
+                  }) =>
+                    segment
+                      .wrapUpCode
+                )
+                .map(
+                  ({
+                    segment,
+                  }) => ({
+                    id:
+                      segment
+                        .wrapUpCode,
+                    name:
+                      segment
+                        .wrapUpCodeName ||
+                      null,
+                  })
+                )
+            );
+
+          const disconnectReasons = [
+            ...new Set(
+              allSegments
+                .flatMap(
+                  ({
+                    segment,
+                  }) => [
+                    segment
+                      .disconnectType,
+                    segment
+                      .disconnectReason,
+                  ]
+                )
+                .filter(Boolean)
+            ),
+          ];
+
+          const flows =
+            uniqueObjectsById(
+              allSegments
+                .filter(
+                  ({
+                    segment,
+                  }) =>
+                    segment.flowId
+                )
+                .map(
+                  ({
+                    segment,
+                  }) => ({
+                    id:
+                      segment.flowId,
+                    name:
+                      segment
+                        .flowName ||
+                      null,
+                  })
+                )
+            );
+
+          const startTime =
+            conversation
+              .conversationStart ||
+            null;
+
+          const endTime =
+            conversation
+              .conversationEnd ||
+            null;
+
+          const contact = {
+            conversationId,
+            normalizedAni:
+              caller.normalizedAni,
+            originalAni:
+              String(
+                caller.originalAni
+              ),
+            externalContactId:
+              caller.externalContactId,
+            customerParticipantId:
+              caller.participantId,
+            customerName:
+              caller.participantName,
+            startTime,
+            endTime,
+            startTimestamp:
+              timestampMs(
+                startTime
+              ),
+            endTimestamp:
+              timestampMs(
+                endTime
+              ),
+            mediaTypes,
+            queues,
+            agents,
+            wrapUpCodes,
+            flows,
+            disconnectReasons,
+          };
+
+          if (
+            !contactsByAni.has(
+              caller.normalizedAni
+            )
+          ) {
+            contactsByAni.set(
+              caller.normalizedAni,
+              []
+            );
+          }
+
+          contactsByAni
+            .get(
+              caller.normalizedAni
+            )
+            .push(contact);
+        }
+
+        if (
+          conversations.length <
+            pageSize
+        ) {
+          reachedLastPage = true;
+          break;
+        }
+      }
+
+      /*
+       * Build repeat-contact episodes. A contact
+       * remains in the same episode when the gap from
+       * the previous contact does not exceed the
+       * configured repeat window.
+       */
+      function buildEpisodes(
+        contacts
+      ) {
+        const ordered =
+          [...contacts].sort(
+            (left, right) =>
+              (
+                left.startTimestamp ||
+                0
+              ) -
+              (
+                right.startTimestamp ||
+                0
+              )
+          );
+
+        const episodes = [];
+        let currentEpisode = [];
+
+        for (
+          const contact of ordered
+        ) {
+          if (
+            !currentEpisode.length
+          ) {
+            currentEpisode = [
+              contact
+            ];
+            continue;
+          }
+
+          const previous =
+            currentEpisode[
+              currentEpisode.length -
+                1
+            ];
+
+          const currentStart =
+            contact.startTimestamp;
+
+          const previousStart =
+            previous.startTimestamp;
+
+          const gapMs =
+            currentStart !== null &&
+            previousStart !== null
+              ? currentStart -
+                previousStart
+              : Number
+                  .MAX_SAFE_INTEGER;
+
+          if (
+            gapMs <= repeatWindowMs
+          ) {
+            currentEpisode.push(
+              contact
+            );
+          } else {
+            episodes.push(
+              currentEpisode
+            );
+
+            currentEpisode = [
+              contact
+            ];
+          }
+        }
+
+        if (
+          currentEpisode.length
+        ) {
+          episodes.push(
+            currentEpisode
+          );
+        }
+
+        return episodes.map(
+          (
+            episodeContacts,
+            index
+          ) => {
+            const first =
+              episodeContacts[0];
+
+            const last =
+              episodeContacts[
+                episodeContacts.length -
+                  1
+              ];
+
+            const queueIds = [
+              ...new Set(
+                episodeContacts
+                  .flatMap(
+                    (contact) =>
+                      contact.queues.map(
+                        (queue) =>
+                          queue.id
+                      )
+                  )
+              ),
+            ];
+
+            const queueNames = [
+              ...new Set(
+                episodeContacts
+                  .flatMap(
+                    (contact) =>
+                      contact.queues.map(
+                        (queue) =>
+                          queue.name
+                      )
+                  )
+                  .filter(Boolean)
+              ),
+            ];
+
+            const agentUserIds = [
+              ...new Set(
+                episodeContacts
+                  .flatMap(
+                    (contact) =>
+                      contact.agents.map(
+                        (agent) =>
+                          agent.id
+                      )
+                  )
+                  .filter(Boolean)
+              ),
+            ];
+
+            const wrapUpCodeIds = [
+              ...new Set(
+                episodeContacts
+                  .flatMap(
+                    (contact) =>
+                      contact
+                        .wrapUpCodes
+                        .map(
+                          (code) =>
+                            code.id
+                        )
+                  )
+              ),
+            ];
+
+            return {
+              episodeNumber:
+                index + 1,
+              qualifyingRepeat:
+                episodeContacts
+                  .length >=
+                minimumContacts,
+              contactCount:
+                episodeContacts.length,
+              firstContact:
+                first.startTime,
+              lastContact:
+                last.startTime,
+              elapsedHours:
+                hoursBetween(
+                  first.startTime,
+                  last.startTime
+                ),
+              queueIds,
+              queueNames,
+              agentUserIds,
+              wrapUpCodeIds,
+              disconnectReasons: [
+                ...new Set(
+                  episodeContacts
+                    .flatMap(
+                      (contact) =>
+                        contact
+                          .disconnectReasons
+                    )
+                ),
+              ],
+              conversationIds:
+                episodeContacts.map(
+                  (contact) =>
+                    contact
+                      .conversationId
+                ),
+              contacts:
+                episodeContacts.map(
+                  ({
+                    startTimestamp:
+                      _startTimestamp,
+                    endTimestamp:
+                      _endTimestamp,
+                    ...contact
+                  }) => contact
+                ),
+            };
+          }
+        );
+      }
+
+      const callerResults = [];
+
+      for (
+        const [
+          normalizedAni,
+          contacts,
+        ] of contactsByAni
+      ) {
+        const episodes =
+          buildEpisodes(
+            contacts
+          );
+
+        const qualifyingEpisodes =
+          episodes.filter(
+            (episode) =>
+              episode
+                .qualifyingRepeat
+          );
+
+        if (
+          !requestedAni &&
+          !qualifyingEpisodes.length
+        ) {
+          continue;
+        }
+
+        if (
+          requestedAni &&
+          !qualifyingEpisodes.length &&
+          !includeNonrepeatContacts
+        ) {
+          continue;
+        }
+
+        const rankedEpisodes =
+          [...qualifyingEpisodes]
+            .sort(
+              (
+                left,
+                right
+              ) => {
+                if (
+                  right
+                    .contactCount !==
+                  left.contactCount
+                ) {
+                  return (
+                    right
+                      .contactCount -
+                    left
+                      .contactCount
+                  );
+                }
+
+                const leftElapsed =
+                  left
+                    .elapsedHours ??
+                  Number
+                    .MAX_SAFE_INTEGER;
+
+                const rightElapsed =
+                  right
+                    .elapsedHours ??
+                  Number
+                    .MAX_SAFE_INTEGER;
+
+                if (
+                  leftElapsed !==
+                  rightElapsed
+                ) {
+                  return (
+                    leftElapsed -
+                    rightElapsed
+                  );
+                }
+
+                return (
+                  (
+                    timestampMs(
+                      right
+                        .lastContact
+                    ) || 0
+                  ) -
+                  (
+                    timestampMs(
+                      left
+                        .lastContact
+                    ) || 0
+                  )
+                );
+              }
+            );
+
+        const topEpisode =
+          rankedEpisodes[0] ||
+          null;
+
+        const orderedContacts =
+          [...contacts].sort(
+            (left, right) =>
+              (
+                left.startTimestamp ||
+                0
+              ) -
+              (
+                right.startTimestamp ||
+                0
+              )
+          );
+
+        callerResults.push({
+          ani:
+            normalizedAni,
+          originalAnis: [
+            ...new Set(
+              contacts.map(
+                (contact) =>
+                  contact.originalAni
+              )
+            ),
+          ],
+          externalContactIds: [
+            ...new Set(
+              contacts
+                .map(
+                  (contact) =>
+                    contact
+                      .externalContactId
+                )
+                .filter(Boolean)
+            ),
+          ],
+          customerNames: [
+            ...new Set(
+              contacts
+                .map(
+                  (contact) =>
+                    contact.customerName
+                )
+                .filter(Boolean)
+            ),
+          ],
+          totalContacts:
+            contacts.length,
+          repeatEpisodeCount:
+            qualifyingEpisodes.length,
+          topEpisodeContactCount:
+            topEpisode
+              ?.contactCount ||
+            0,
+          topEpisodeElapsedHours:
+            topEpisode
+              ?.elapsedHours ??
+            null,
+          mostRecentContact:
+            orderedContacts.length
+              ? orderedContacts[
+                  orderedContacts
+                    .length - 1
+                ].startTime
+              : null,
+          qualifyingEpisodes:
+            rankedEpisodes,
+          allEpisodes:
+            requestedAni
+              ? episodes
+              : undefined,
+          allContacts:
+            requestedAni &&
+            includeNonrepeatContacts
+              ? orderedContacts.map(
+                  ({
+                    startTimestamp:
+                      _startTimestamp,
+                    endTimestamp:
+                      _endTimestamp,
+                    ...contact
+                  }) => contact
+                )
+              : undefined,
+        });
+      }
+
+      /*
+       * Most operationally concerning repeat callers
+       * appear first:
+       * 1. Most contacts in one episode
+       * 2. Shortest episode duration
+       * 3. Most recent contact
+       */
+      callerResults.sort(
+        (left, right) => {
+          if (
+            right
+              .topEpisodeContactCount !==
+            left
+              .topEpisodeContactCount
+          ) {
+            return (
+              right
+                .topEpisodeContactCount -
+              left
+                .topEpisodeContactCount
+            );
+          }
+
+          const leftElapsed =
+            left
+              .topEpisodeElapsedHours ??
+            Number
+              .MAX_SAFE_INTEGER;
+
+          const rightElapsed =
+            right
+              .topEpisodeElapsedHours ??
+            Number
+              .MAX_SAFE_INTEGER;
+
+          if (
+            leftElapsed !==
+            rightElapsed
+          ) {
+            return (
+              leftElapsed -
+              rightElapsed
+            );
+          }
+
+          return (
+            (
+              timestampMs(
+                right
+                  .mostRecentContact
+              ) || 0
+            ) -
+            (
+              timestampMs(
+                left
+                  .mostRecentContact
+              ) || 0
+            )
+          );
+        }
+      );
+
+      const returnedCallers =
+        callerResults.slice(
+          0,
+          maxResults
+        );
+
+      const truncated =
+        !reachedLastPage &&
+        pagesProcessed >=
+          maxPages;
+
+      return {
+        mode:
+          requestedAni
+            ? 'specific_ani'
+            : 'discovery',
+        startDate:
+          a.start_date,
+        endDate:
+          a.end_date,
+        calendarDays,
+        requestedAni:
+          requestedAni || null,
+        minimumContacts,
+        repeatWindowHours,
+        direction,
+        pageSize,
+        maxPages,
+        maxResults,
+        reportedTotalHits,
+        pagesProcessed,
+        conversationsProcessed,
+        voiceConversationsProcessed,
+        conversationsWithoutAni,
+        uniqueAnisAnalyzed:
+          contactsByAni.size,
+        repeatCallersFound:
+          callerResults.filter(
+            (caller) =>
+              caller
+                .repeatEpisodeCount >
+              0
+          ).length,
+        callersReturned:
+          returnedCallers.length,
+        truncated,
+        callers:
+          returnedCallers,
+        traceInstructions:
+          returnedCallers.length
+            ? 'Use trace_interaction with the returned conversationIds when the user asks why a caller contacted repeatedly or wants to visualize the interaction journeys.'
+            : null,
+        note:
+          truncated
+            ? 'The search reached max_pages before confirming the final analytics page. Reduce the date range or divide the search into smaller requests for complete results.'
+            : requestedAni
+              ? 'The requested ANI was analyzed. allContacts includes nonrepeat interactions when include_nonrepeat_contacts is true.'
+              : 'The date range was fully scanned and repeat callers were discovered automatically from customer-side ANI values.',
+      };
+    },
+  },
+  
   {
     name: 'list_queues',
     description: 'List routing queues (name, id, division). Optional name_filter supports * wildcards (e.g. "*support*").',
@@ -6359,7 +7810,7 @@ export const TOOL_GROUPS = [
   { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
   { name: 'Quality Management', icon: '📊', tools: ['list_quality_evaluations', 'get_quality_evaluation', 'get_quality_evaluation_form', 'get_quality_question_scores', 'get_quality_conversation', 'create_quality_evaluation_form',] },
   { name: 'Customer Surveys', icon: '📝', tools: ['list_quality_surveys', 'find_quality_survey_responses', 'get_quality_survey', 'get_quality_survey_form', 'get_quality_survey_question_scores', 'create_customer_survey_form',] },
-  { name: 'Conversations & Interaction Details', icon: '🔎', tools: ['search_conversations_by_attribute', 'get_conversation_details', 'trace_interaction' ] },
+  { name: 'Conversations & Interaction Details', icon: '🔎', tools: ['search_conversations_by_attribute', 'get_conversation_details', 'trace_interaction', 'find_repeat_contacts' ] },
   { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'update_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
   { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'update_user_contact_options', 'set_user_direct_routing_tag'] },
   { name: 'Groups', icon: '👨‍👩‍👧‍👦', tools: ['update_group_users'] },
