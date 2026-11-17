@@ -102,19 +102,22 @@ export const TOOLS = [
     },
   },
   // ----- quality management -----
-  {
+   {
     name: 'create_quality_evaluation_form',
-    description: 'Create a draft Genesys Cloud Quality Management evaluation form. Supports multiple question groups, multiple questions, answer options and scoring, N/A, comments-required, critical questions, kill/fatal questions, weights, and multiple-choice or multiple-select questions. Creates the form as a draft and does not publish it.',
+    description: 'Create an unpublished draft Genesys Cloud Quality Management evaluation form with question groups, weighted questions, scored answer options, N/A settings, help text, required comments, critical questions, and fatal questions. AI scoring is not configured by this tool.',
     inputSchema: {
       type: 'object',
       properties: {
         name: {
           type: 'string',
-          description: 'Name of the evaluation form',
+          description:
+            'Name of the evaluation form',
         },
         question_groups: {
           type: 'array',
-          description: 'Question groups. Each group should contain name, optional weight/settings, and a questions array. Each question should contain text, optional type/settings, and answer_options with text and numeric value.',
+          description:
+            'Question groups containing names, optional settings, and questions',
+          minItems: 1,
           items: {
             type: 'object',
             additionalProperties: true,
@@ -141,7 +144,9 @@ export const TOOLS = [
       }
 
       if (
-        !Array.isArray(a.question_groups) ||
+        !Array.isArray(
+          a.question_groups
+        ) ||
         !a.question_groups.length
       ) {
         throw new GenesysError(
@@ -149,11 +154,7 @@ export const TOOLS = [
           400
         );
       }
-const aiScoringQuestionNumbers =
-  new Set();
 
-let globalQuestionNumber = 0;
-      
       const questionGroups =
         a.question_groups.map(
           (group, groupIndex) => {
@@ -169,7 +170,9 @@ let globalQuestionNumber = 0;
             }
 
             if (
-              !Array.isArray(group.questions) ||
+              !Array.isArray(
+                group.questions
+              ) ||
               !group.questions.length
             ) {
               throw new GenesysError(
@@ -181,10 +184,14 @@ let globalQuestionNumber = 0;
             const groupWeight =
               group.weight === undefined
                 ? 1
-                : Number(group.weight);
+                : Number(
+                    group.weight
+                  );
 
             if (
-              !Number.isFinite(groupWeight) ||
+              !Number.isFinite(
+                groupWeight
+              ) ||
               groupWeight < 0
             ) {
               throw new GenesysError(
@@ -210,67 +217,46 @@ let globalQuestionNumber = 0;
                       400
                     );
                   }
-globalQuestionNumber++;
 
-if (
-  question.ai_scoring === true ||
-  question.enable_ai_scoring === true ||
-  question.enableAiScoring === true
-) {
-  aiScoringQuestionNumbers.add(
-    globalQuestionNumber
-  );
-}
-                const requestedQuestionType =
-  question.type ||
-  'multipleChoice';
+                  /*
+                   * Accept friendly MCP values and native
+                   * Genesys QuestionType values.
+                   */
+                  const requestedQuestionType =
+                    question.type ||
+                    'multipleChoice';
 
-const questionTypeMap = {
-  multipleChoice:
-    'multipleChoiceQuestion',
-  multipleChoiceQuestion:
-    'multipleChoiceQuestion',
+                  const questionTypeMap = {
+                    multipleChoice:
+                      'multipleChoiceQuestion',
+                    multipleChoiceQuestion:
+                      'multipleChoiceQuestion',
 
-  multipleSelect:
-    'multipleSelectQuestion',
-  multipleSelectQuestion:
-    'multipleSelectQuestion',
+                    multipleSelect:
+                      'multipleSelectQuestion',
+                    multipleSelectQuestion:
+                      'multipleSelectQuestion',
+                  };
 
-  freeText:
-    'freeTextQuestion',
-  freeTextQuestion:
-    'freeTextQuestion',
+                  const questionType =
+                    questionTypeMap[
+                      requestedQuestionType
+                    ];
 
-  nps:
-    'npsQuestion',
-  npsQuestion:
-    'npsQuestion',
-
-  readOnlyTextBlock:
-    'readOnlyTextBlockQuestion',
-  readOnlyTextBlockQuestion:
-    'readOnlyTextBlockQuestion',
-};
-
-const questionType =
-  questionTypeMap[
-    requestedQuestionType
-  ];
-
-if (!questionType) {
-  throw new GenesysError(
-    `Question "${questionText}" has unsupported type "${requestedQuestionType}". ` +
-    'Use multipleChoice, multipleSelect, freeText, nps, readOnlyTextBlock, ' +
-    'or the corresponding native Genesys QuestionType value.',
-    400
-  );
-}
+                  if (!questionType) {
+                    throw new GenesysError(
+                      `Question "${questionText}" has unsupported type "${requestedQuestionType}". ` +
+                      'Use multipleChoice, multipleChoiceQuestion, multipleSelect, or multipleSelectQuestion.',
+                      400
+                    );
+                  }
 
                   if (
                     !Array.isArray(
                       question.answer_options
                     ) ||
-                    question.answer_options
+                    question
+                      .answer_options
                       .length < 2
                   ) {
                     throw new GenesysError(
@@ -280,49 +266,58 @@ if (!questionType) {
                   }
 
                   const answerOptions =
-                    question.answer_options.map(
-                      (
-                        answer,
-                        answerIndex
-                      ) => {
-                        const answerText =
-                          String(
-                            answer?.text || ''
-                          ).trim();
+                    question
+                      .answer_options
+                      .map(
+                        (
+                          answer,
+                          answerIndex
+                        ) => {
+                          const answerText =
+                            String(
+                              answer?.text ||
+                                ''
+                            ).trim();
 
-                        if (!answerText) {
-                          throw new GenesysError(
-                            `Answer ${answerIndex + 1} for "${questionText}" must have text.`,
-                            400
-                          );
+                          if (
+                            !answerText
+                          ) {
+                            throw new GenesysError(
+                              `Answer ${answerIndex + 1} for "${questionText}" must have text.`,
+                              400
+                            );
+                          }
+
+                          const answerValue =
+                            Number(
+                              answer.value
+                            );
+
+                          if (
+                            !Number.isFinite(
+                              answerValue
+                            )
+                          ) {
+                            throw new GenesysError(
+                              `Answer "${answerText}" for "${questionText}" must have a numeric value.`,
+                              400
+                            );
+                          }
+
+                          return {
+                            text:
+                              answerText,
+                            value:
+                              answerValue,
+                          };
                         }
-
-                        const answerValue =
-                          Number(
-                            answer.value
-                          );
-
-                        if (
-                          !Number.isFinite(
-                            answerValue
-                          )
-                        ) {
-                          throw new GenesysError(
-                            `Answer "${answerText}" for "${questionText}" must have a numeric value.`,
-                            400
-                          );
-                        }
-
-                        return {
-                          text: answerText,
-                          value: answerValue,
-                        };
-                      }
-                    );
+                      );
 
                   const questionBody = {
-                    text: questionText,
-                    type: questionType,
+                    text:
+                      questionText,
+                    type:
+                      questionType,
                     naEnabled:
                       question.na_enabled ===
                       true,
@@ -382,393 +377,79 @@ if (!questionType) {
                 }
               );
 
-           
-             return {
-  type: 'questionGroup',
-  name: groupName,
-  weight: groupWeight,
-  manualWeight:
-    group.manual_weight !==
-    false,
-  naEnabled:
-    group.na_enabled ===
-    true,
-  defaultAnswersToHighest:
-    group
-      .default_answers_to_highest ===
-    true,
-  defaultAnswersToNA:
-    group
-      .default_answers_to_na ===
-    true,
-  questions,
-};
+            /*
+             * Genesys requires the QuestionGroup
+             * subtype discriminator.
+             */
+            return {
+              type:
+                'questionGroup',
+              name:
+                groupName,
+              weight:
+                groupWeight,
+              manualWeight:
+                group.manual_weight !==
+                false,
+              naEnabled:
+                group.na_enabled ===
+                true,
+              defaultAnswersToHighest:
+                group
+                  .default_answers_to_highest ===
+                true,
+              defaultAnswersToNA:
+                group
+                  .default_answers_to_na ===
+                true,
+              questions,
+            };
           }
         );
 
       const body = {
-        name: formName,
+        name:
+          formName,
         questionGroups,
       };
-const createdForm =
-  await gc.post(
-    '/api/v2/quality/forms/evaluations',
-    body
-  );
 
-const formId = pathId(
-  'evaluation form id',
-  createdForm.id
-);
-
-/*
- * Genesys generates the group/question contextIds
- * when the draft is created. Retrieve the saved
- * draft before constructing aiScoring.
- */
-let savedForm = await gc.get(
-  `/api/v2/quality/forms/evaluations/${formId}`
-);
-
-if (aiScoringQuestionNumbers.size) {
-  const savedQuestionGroups =
-    Array.isArray(
-      savedForm.questionGroups
-    )
-      ? savedForm.questionGroups
-      : [];
-
-  const questionGroupSettings = [];
-
-  let savedQuestionNumber = 0;
-
-  for (
-    let groupIndex = 0;
-    groupIndex <
-      savedQuestionGroups.length;
-    groupIndex++
-  ) {
-    const savedGroup =
-      savedQuestionGroups[groupIndex];
-
-    const groupContextId =
-      savedGroup.contextId ||
-      savedGroup.questionGroupContextId ||
-      null;
-
-    if (!groupContextId) {
-      throw new GenesysError(
-        `Draft form ${formId} was created, but question group ${groupIndex + 1} has no contextId. AI scoring could not be configured.`,
-        502
-      );
-    }
-
-    const savedQuestions =
-      Array.isArray(
-        savedGroup.questions
-      )
-        ? savedGroup.questions
-        : [];
-
-    const questionSettings = [];
-
-    for (
-      let questionIndex = 0;
-      questionIndex <
-        savedQuestions.length;
-      questionIndex++
-    ) {
-      savedQuestionNumber++;
-
-      /*
-       * Questions with AI scoring off are
-       * deliberately omitted from aiScoring,
-       * matching the working Demo form.
-       */
-     const savedQuestion =
-  savedQuestions[questionIndex];
-
-const aiScoringEnabled =
-  aiScoringQuestionNumbers.has(
-    savedQuestionNumber
-  );
-
-if (!aiScoringEnabled) {
-  /*
-   * Genesys treats the missing property as AI
-   * scoring off. Remove it in case the saved
-   * draft already contains the property.
-   */
-  delete savedQuestion
-    .automatedScoringFocus;
-
-  continue;
-}
-
-/*
- * The Genesys UI writes this property when
- * AI scoring is enabled for a question.
- */
-savedQuestion.automatedScoringFocus =
-  'FullInteraction';
-
-      const questionContextId =
-        savedQuestion.contextId ||
-        savedQuestion.questionContextId ||
-        null;
-
-      if (!questionContextId) {
-        throw new GenesysError(
-          `Draft form ${formId} was created, but question ${savedQuestionNumber} has no contextId. AI scoring could not be configured.`,
-          502
+      const createdForm =
+        await gc.post(
+          '/api/v2/quality/forms/evaluations',
+          body
         );
-      }
 
-      questionSettings.push({
-        questionContextId,
-        settings: {
-          enabled: true,
-        },
-      });
-    }
-
-    /*
-     * Do not send empty group settings.
-     */
-    if (questionSettings.length) {
-      questionGroupSettings.push({
-        questionGroupContextId:
-          groupContextId,
-        questionSettings,
-      });
-    }
-  }
-
- const updateBody = {
-  ...savedForm,
-
-  /*
-   * The Genesys UI adds evaluationSettings when
-   * AI scoring is configured. Preserve existing
-   * values when present and use the observed UI
-   * defaults when they are absent.
-   */
-  evaluationSettings: {
-    revisionsEnabled:
-      savedForm.evaluationSettings
-        ?.revisionsEnabled === true,
-    disputesEnabled:
-      savedForm.evaluationSettings
-        ?.disputesEnabled === true,
+      return {
+        created:
+          true,
+        published:
+          false,
+        aiScoringConfigured:
+          false,
+        formId:
+          createdForm.id || null,
+        name:
+          createdForm.name ||
+          formName,
+        questionGroupCount:
+          questionGroups.length,
+        questionCount:
+          questionGroups.reduce(
+            (
+              total,
+              group
+            ) =>
+              total +
+              group.questions.length,
+            0
+          ),
+        form:
+          createdForm,
+        note:
+          'The evaluation form was created as an unpublished draft. AI scoring was not configured and must be enabled in the Genesys Cloud evaluation-form editor.',
+      };
+    },
   },
-
-  /*
-   * AI scoring is configured at the form level.
-   * Only groups and questions with AI scoring
-   * enabled are included.
-   */
-  aiScoring: {
-    questionGroupSettings,
-  },
-};
-
-  /*
-   * These are response metadata rather than
-   * editable form fields.
-   */
-  delete updateBody.id;
-  delete updateBody.selfUri;
-  delete updateBody.createdBy;
-  delete updateBody.modifiedBy;
-  delete updateBody.dateCreated;
-  delete updateBody.dateModified;
-
-  await gc.api(
-    'PUT',
-    `/api/v2/quality/forms/evaluations/${formId}`,
-    {
-      body: updateBody,
-    }
-  );
-
-  /*
-   * Read it back so we verify Genesys actually
-   * persisted the AI-scoring configuration.
-   */
-  savedForm = await gc.get(
-    `/api/v2/quality/forms/evaluations/${formId}`
-  );
-}
-
-/*
- * Collect the contextIds that Genesys says are
- * actually enabled after the update.
- */
-const enabledContextIds =
-  new Set();
-
-const savedAiGroups =
-  Array.isArray(
-    savedForm.aiScoring
-      ?.questionGroupSettings
-  )
-    ? savedForm.aiScoring
-        .questionGroupSettings
-    : [];
-
-for (
-  const groupSetting of savedAiGroups
-) {
-  const settings =
-    Array.isArray(
-      groupSetting.questionSettings
-    )
-      ? groupSetting.questionSettings
-      : [];
-
-  for (
-    const questionSetting of settings
-  ) {
-    if (
-      questionSetting
-        ?.settings
-        ?.enabled === true &&
-      questionSetting
-        .questionContextId
-    ) {
-      enabledContextIds.add(
-        questionSetting.questionContextId
-      );
-    }
-  }
-}
-
-/*
- * Verify every question requested for AI scoring.
- */
-const verification = [];
-
-let verificationQuestionNumber = 0;
-
-const verificationGroups =
-  Array.isArray(
-    savedForm.questionGroups
-  )
-    ? savedForm.questionGroups
-    : [];
-
-for (
-  const group of verificationGroups
-) {
-  const questions =
-    Array.isArray(group.questions)
-      ? group.questions
-      : [];
-
-  for (const question of questions) {
-    verificationQuestionNumber++;
-
-    const contextId =
-      question.contextId ||
-      question.questionContextId ||
-      null;
-
-    const requested =
-      aiScoringQuestionNumbers.has(
-        verificationQuestionNumber
-      );
-
-    const enabled =
-      contextId
-        ? enabledContextIds.has(
-            contextId
-          )
-        : false;
-
-  const automatedScoringFocus =
-  question.automatedScoringFocus ||
-  null;
-
-const focusConfigured =
-  automatedScoringFocus ===
-  'FullInteraction';
-
-verification.push({
-  questionNumber:
-    verificationQuestionNumber,
-  questionText:
-    question.text || null,
-  requestedAiScoring:
-    requested,
-  aiScoringEnabled:
-    enabled,
-  automatedScoringFocus,
-  focusConfigured,
-});
-  }
-}
-const failedAiScoring =
-  verification.filter(
-    (question) =>
-      question.requestedAiScoring &&
-      (
-        !question.aiScoringEnabled ||
-        !question.focusConfigured
-      )
-  );
-
-if (failedAiScoring.length) {
-  throw new GenesysError(
-    `Draft form ${formId} was created, but Genesys did not persist the complete AI-scoring configuration for question(s): ${failedAiScoring
-      .map(
-        (question) =>
-          question.questionNumber
-      )
-      .join(', ')}. ` +
-    `Per-question automatedScoringFocus saved on ${verification.filter(
-      (question) =>
-        question.focusConfigured
-    ).length} question(s). ` +
-    `Form-level aiScoring saved on ${verification.filter(
-      (question) =>
-        question.aiScoringEnabled
-    ).length} question(s).`,
-    502
-  );
-}
-
-return {
-  created: true,
-  published: false,
-  formId,
-  name:
-    savedForm.name ||
-    createdForm.name ||
-    formName,
-  questionGroupCount:
-    questionGroups.length,
-  questionCount:
-    questionGroups.reduce(
-      (total, group) =>
-        total +
-        group.questions.length,
-      0
-    ),
-  aiScoringRequested:
-    aiScoringQuestionNumbers.size,
-  aiScoringEnabled:
-    enabledContextIds.size,
-  aiScoringVerification:
-    verification,
-  form:
-    savedForm,
-  note:
-    aiScoringQuestionNumbers.size
-      ? 'Evaluation form created as an editable draft. AI scoring was configured and verified during the same tool call. The form was not published.'
-      : 'Evaluation form created as an editable draft without AI scoring. The form was not published.',
-};
-      },
-  },   
   {
     name: 'list_quality_evaluations',
     description: 'List completed Genesys Cloud Quality Management evaluations for a specified date range.',
