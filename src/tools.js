@@ -544,12 +544,33 @@ savedQuestion.automatedScoringFocus =
     }
   }
 
-  const updateBody = {
-    ...savedForm,
-    aiScoring: {
-      questionGroupSettings,
-    },
-  };
+ const updateBody = {
+  ...savedForm,
+
+  /*
+   * The Genesys UI adds evaluationSettings when
+   * AI scoring is configured. Preserve existing
+   * values when present and use the observed UI
+   * defaults when they are absent.
+   */
+  evaluationSettings: {
+    revisionsEnabled:
+      savedForm.evaluationSettings
+        ?.revisionsEnabled === true,
+    disputesEnabled:
+      savedForm.evaluationSettings
+        ?.disputesEnabled === true,
+  },
+
+  /*
+   * AI scoring is configured at the form level.
+   * Only groups and questions with AI scoring
+   * enabled are included.
+   */
+  aiScoring: {
+    questionGroupSettings,
+  },
+};
 
   /*
    * These are response metadata rather than
@@ -698,12 +719,20 @@ const failedAiScoring =
 
 if (failedAiScoring.length) {
   throw new GenesysError(
-    `Draft form ${formId} was created, but AI scoring was not saved for question(s): ${failedAiScoring
+    `Draft form ${formId} was created, but Genesys did not persist the complete AI-scoring configuration for question(s): ${failedAiScoring
       .map(
         (question) =>
           question.questionNumber
       )
-      .join(', ')}.`,
+      .join(', ')}. ` +
+    `Per-question automatedScoringFocus saved on ${verification.filter(
+      (question) =>
+        question.focusConfigured
+    ).length} question(s). ` +
+    `Form-level aiScoring saved on ${verification.filter(
+      (question) =>
+        question.aiScoringEnabled
+    ).length} question(s).`,
     502
   );
 }
