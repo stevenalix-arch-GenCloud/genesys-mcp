@@ -2581,6 +2581,1563 @@ if (conversations.length < pageSize) {
     },
   },
   // ----- queues & routing -----
+    {
+    name: 'trace_interaction',
+    description: 'Reconstruct a Genesys Cloud interaction as a chronological journey. Accepts a conversation ID or full Genesys interaction URL and returns a summary, ordered trace events, participants, custom attributes, visualization-ready nodes and edges, and a Mermaid flowchart. Use this tool when the user asks what happened during an interaction, how an interaction was routed, where it transferred, which queues, flows, or agents handled it, or wants to visualize the interaction path.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        conversation: {
+          type: 'string',
+          description:
+            'Genesys Cloud conversation ID or full interaction URL',
+        },
+        include_attributes: {
+          type: 'boolean',
+          description:
+            'Include custom participant attributes in the result. Defaults to true.',
+        },
+        include_raw_segments: {
+          type: 'boolean',
+          description:
+            'Include the underlying analytics segments used to build the trace. Defaults to false.',
+        },
+      },
+      required: [
+        'conversation',
+      ],
+      additionalProperties: false,
+    },
+
+    handler: async (gc, a) => {
+      const conversationId =
+        conversationIdFromInput(
+          a.conversation
+        );
+
+      const includeAttributes =
+        a.include_attributes !== false;
+
+      const includeRawSegments =
+        a.include_raw_segments === true;
+
+      const [
+        operationalResult,
+        analyticsResult,
+      ] = await Promise.allSettled([
+        gc.get(
+          `/api/v2/conversations/${conversationId}`
+        ),
+        gc.get(
+          `/api/v2/analytics/conversations/${conversationId}/details`
+        ),
+      ]);
+
+      const operational =
+        operationalResult.status ===
+        'fulfilled'
+          ? operationalResult.value
+          : null;
+
+      const analytics =
+        analyticsResult.status ===
+        'fulfilled'
+          ? analyticsResult.value
+          : null;
+
+      if (!operational && !analytics) {
+        const operationalError =
+          operationalResult.reason
+            ?.message ||
+          'Operational conversation request failed';
+
+        const analyticsError =
+          analyticsResult.reason
+            ?.message ||
+          'Analytics conversation request failed';
+
+        throw new GenesysError(
+          `Unable to retrieve conversation ${conversationId}. ` +
+          `Operational API: ${operationalError}. ` +
+          `Analytics API: ${analyticsError}.`,
+          operationalResult.reason
+            ?.status ||
+            analyticsResult.reason
+              ?.status ||
+            502
+        );
+      }
+
+      function firstDefined(
+        ...values
+      ) {
+        return values.find(
+          (value) =>
+            value !== undefined &&
+            value !== null &&
+            value !== ''
+        );
+      }
+
+      function timestampMs(value) {
+        if (!value) {
+          return null;
+        }
+
+        const milliseconds =
+          new Date(value).getTime();
+
+        return Number.isFinite(
+          milliseconds
+        )
+          ? milliseconds
+          : null;
+      }
+
+      function durationMs(
+        start,
+        end
+      ) {
+        const startMs =
+          timestampMs(start);
+
+        const endMs =
+          timestampMs(end);
+
+        if (
+          startMs === null ||
+          endMs === null ||
+          endMs < startMs
+        ) {
+          return null;
+        }
+
+        return endMs - startMs;
+      }
+
+      function formatDuration(
+        milliseconds
+      ) {
+        if (
+          milliseconds === null ||
+          milliseconds === undefined ||
+          !Number.isFinite(
+            milliseconds
+          )
+        ) {
+          return null;
+        }
+
+        const totalSeconds =
+          Math.max(
+            0,
+            Math.round(
+              milliseconds / 1000
+            )
+          );
+
+        const hours =
+          Math.floor(
+            totalSeconds / 3600
+          );
+
+        const minutes =
+          Math.floor(
+            (
+              totalSeconds % 3600
+            ) / 60
+          );
+
+        const seconds =
+          totalSeconds % 60;
+
+        if (hours) {
+          return (
+            `${hours}h ` +
+            `${minutes}m ` +
+            `${seconds}s`
+          );
+        }
+
+        if (minutes) {
+          return (
+            `${minutes}m ` +
+            `${seconds}s`
+          );
+        }
+
+        return `${seconds}s`;
+      }
+
+      function normalizePurpose(
+        value
+      ) {
+        return String(
+          value || 'unknown'
+        ).toLowerCase();
+      }
+
+      function cleanLabel(
+        value,
+        fallback
+      ) {
+        const text = String(
+          value ||
+          fallback ||
+          'Unknown'
+        )
+          .replace(
+            /\s+/g,
+            ' '
+          )
+          .trim();
+
+        return text || 'Unknown';
+      }
+
+      function escapeMermaid(
+        value
+      ) {
+        return cleanLabel(
+          value,
+          'Unknown'
+        )
+          .replace(
+            /"/g,
+            "'"
+          )
+          .replace(
+            /\[/g,
+            '('
+          )
+          .replace(
+            /\]/g,
+            ')'
+          )
+          .replace(
+            /\{/g,
+            '('
+          )
+          .replace(
+            /\}/g,
+            ')'
+          )
+          .replace(
+            /\|/g,
+            '/'
+          );
+      }
+
+      const operationalParticipants =
+        Array.isArray(
+          operational?.participants
+        )
+          ? operational.participants
+          : [];
+
+      const analyticsParticipants =
+        Array.isArray(
+          analytics?.participants
+        )
+          ? analytics.participants
+          : [];
+
+      const operationalById =
+        new Map(
+          operationalParticipants
+            .filter(
+              (participant) =>
+                participant?.id
+            )
+            .map(
+              (participant) => [
+                participant.id,
+                participant,
+              ]
+            )
+        );
+
+      const analyticsById =
+        new Map(
+          analyticsParticipants
+            .filter(
+              (participant) =>
+                participant
+                  ?.participantId
+            )
+            .map(
+              (participant) => [
+                participant
+                  .participantId,
+                participant,
+              ]
+            )
+        );
+
+      const participantIds = [
+        ...new Set([
+          ...operationalById.keys(),
+          ...analyticsById.keys(),
+        ]),
+      ];
+
+      const participants =
+        participantIds.map(
+          (
+            participantId,
+            index
+          ) => {
+            const operationalParticipant =
+              operationalById.get(
+                participantId
+              ) || {};
+
+            const analyticsParticipant =
+              analyticsById.get(
+                participantId
+              ) || {};
+
+            const sessions =
+              Array.isArray(
+                analyticsParticipant
+                  .sessions
+              )
+                ? analyticsParticipant
+                    .sessions
+                : [];
+
+            const attributes =
+              operationalParticipant
+                .attributes &&
+              typeof operationalParticipant
+                .attributes ===
+                'object' &&
+              !Array.isArray(
+                operationalParticipant
+                  .attributes
+              )
+                ? operationalParticipant
+                    .attributes
+                : {};
+
+            const purpose =
+              firstDefined(
+                operationalParticipant
+                  .purpose,
+                analyticsParticipant
+                  .purpose
+              ) || 'unknown';
+
+            const name =
+              firstDefined(
+                operationalParticipant
+                  .name,
+                analyticsParticipant
+                  .participantName,
+                operationalParticipant
+                  .user?.name
+              ) || null;
+
+            const userId =
+              firstDefined(
+                operationalParticipant
+                  .userId,
+                operationalParticipant
+                  .user?.id,
+                analyticsParticipant
+                  .userId
+              ) || null;
+
+            const ani =
+              firstDefined(
+                operationalParticipant
+                  .ani,
+                ...sessions.map(
+                  (session) =>
+                    session.ani
+                )
+              ) || null;
+
+            const dnis =
+              firstDefined(
+                operationalParticipant
+                  .dnis,
+                ...sessions.map(
+                  (session) =>
+                    session.dnis
+                )
+              ) || null;
+
+            return {
+              participantId,
+              sequence:
+                index + 1,
+              purpose,
+              name,
+              userId,
+              externalContactId:
+                firstDefined(
+                  operationalParticipant
+                    .externalContactId,
+                  operationalParticipant
+                    .externalContact?.id,
+                  analyticsParticipant
+                    .externalContactId
+                ) || null,
+              ani,
+              aniName:
+                firstDefined(
+                  operationalParticipant
+                    .aniName,
+                  ...sessions.map(
+                    (session) =>
+                      session.aniName
+                  )
+                ) || null,
+              dnis,
+              address:
+                firstDefined(
+                  operationalParticipant
+                    .address,
+                  analyticsParticipant
+                    .externalAddress
+                ) || null,
+              connectedTime:
+                operationalParticipant
+                  .connectedTime ||
+                null,
+              endTime:
+                operationalParticipant
+                  .endTime ||
+                null,
+              attributes:
+                includeAttributes
+                  ? attributes
+                  : undefined,
+            };
+          }
+        );
+
+      const participantById =
+        new Map(
+          participants.map(
+            (participant) => [
+              participant
+                .participantId,
+              participant,
+            ]
+          )
+        );
+
+      const rawSegments = [];
+
+      for (
+        const participant of
+          analyticsParticipants
+      ) {
+        const participantId =
+          participant
+            .participantId ||
+          null;
+
+        const participantSummary =
+          participantId
+            ? participantById.get(
+                participantId
+              )
+            : null;
+
+        const sessions =
+          Array.isArray(
+            participant.sessions
+          )
+            ? participant.sessions
+            : [];
+
+        for (
+          const session of sessions
+        ) {
+          const segments =
+            Array.isArray(
+              session.segments
+            )
+              ? session.segments
+              : [];
+
+          for (
+            let segmentIndex = 0;
+            segmentIndex <
+              segments.length;
+            segmentIndex++
+          ) {
+            const segment =
+              segments[
+                segmentIndex
+              ];
+
+            rawSegments.push({
+              participantId,
+              participantName:
+                participantSummary
+                  ?.name ||
+                participant
+                  .participantName ||
+                null,
+              participantPurpose:
+                participantSummary
+                  ?.purpose ||
+                participant.purpose ||
+                null,
+              userId:
+                participantSummary
+                  ?.userId ||
+                participant.userId ||
+                null,
+              sessionId:
+                session.sessionId ||
+                session.id ||
+                null,
+              mediaType:
+                session.mediaType ||
+                null,
+              direction:
+                session.direction ||
+                null,
+              ani:
+                session.ani ||
+                null,
+              aniName:
+                session.aniName ||
+                null,
+              dnis:
+                session.dnis ||
+                null,
+              protocolCallId:
+                session.protocolCallId ||
+                null,
+              edgeId:
+                session.edgeId ||
+                null,
+              peerId:
+                session.peerId ||
+                null,
+              segmentIndex,
+              segment,
+            });
+          }
+        }
+      }
+
+      function deriveEventType(
+        item
+      ) {
+        const segment =
+          item.segment || {};
+
+        const segmentType =
+          String(
+            segment.segmentType ||
+            ''
+          ).toLowerCase();
+
+        const purpose =
+          normalizePurpose(
+            item.participantPurpose
+          );
+
+        if (
+          segment.transferType ||
+          segment
+            .transferTargetAddress ||
+          segment
+            .destinationParticipantId ||
+          segmentType === 'transfer'
+        ) {
+          return 'transfer';
+        }
+
+        if (
+          segment.wrapUpCode ||
+          segmentType === 'wrapup'
+        ) {
+          return 'wrapup';
+        }
+
+        if (
+          segment.queueId ||
+          segmentType === 'acd'
+        ) {
+          return 'queue';
+        }
+
+        if (
+          segment.flowId ||
+          purpose === 'ivr' ||
+          purpose === 'bot' ||
+          purpose === 'workflow'
+        ) {
+          return 'flow';
+        }
+
+        if (
+          segmentType === 'hold' ||
+          segmentType === 'held'
+        ) {
+          return 'hold';
+        }
+
+        if (
+          segmentType === 'alert' ||
+          segmentType ===
+            'contacting'
+        ) {
+          return 'alert';
+        }
+
+        if (
+          segmentType ===
+            'interact' ||
+          segmentType ===
+            'connected'
+        ) {
+          if (
+            purpose === 'agent'
+          ) {
+            return 'agent';
+          }
+
+          if (
+            purpose ===
+              'customer' ||
+            purpose ===
+              'external'
+          ) {
+            return 'customer';
+          }
+
+          return 'interaction';
+        }
+
+        if (
+          segment.disconnectType ||
+          segment
+            .disconnectReason ||
+          segmentType ===
+            'disconnect'
+        ) {
+          return 'disconnect';
+        }
+
+        if (
+          purpose === 'agent'
+        ) {
+          return 'agent';
+        }
+
+        if (
+          purpose === 'customer' ||
+          purpose === 'external'
+        ) {
+          return 'customer';
+        }
+
+        return (
+          segmentType ||
+          purpose ||
+          'interaction'
+        );
+      }
+
+      function deriveLabel(
+        eventType,
+        item
+      ) {
+        const segment =
+          item.segment || {};
+
+        if (
+          eventType === 'queue'
+        ) {
+          return cleanLabel(
+            segment.queueName,
+            segment.queueId
+              ? `Queue ${segment.queueId}`
+              : 'Queue'
+          );
+        }
+
+        if (
+          eventType === 'flow'
+        ) {
+          return cleanLabel(
+            segment.flowName,
+            segment.flowId
+              ? `Flow ${segment.flowId}`
+              : 'Flow'
+          );
+        }
+
+        if (
+          eventType === 'agent'
+        ) {
+          return cleanLabel(
+            item.participantName,
+            item.userId
+              ? `Agent ${item.userId}`
+              : 'Agent'
+          );
+        }
+
+        if (
+          eventType === 'customer'
+        ) {
+          return cleanLabel(
+            item.participantName ||
+            item.aniName,
+            item.ani ||
+            'Customer'
+          );
+        }
+
+        if (
+          eventType === 'hold'
+        ) {
+          return 'Hold';
+        }
+
+        if (
+          eventType === 'alert'
+        ) {
+          return cleanLabel(
+            item.participantName,
+            'Agent alerting'
+          );
+        }
+
+        if (
+          eventType === 'transfer'
+        ) {
+          return cleanLabel(
+            segment
+              .transferTargetAddress ||
+            segment
+              .destinationParticipantName,
+            segment
+              .destinationParticipantId
+              ? `Transfer to ${segment.destinationParticipantId}`
+              : 'Transfer'
+          );
+        }
+
+        if (
+          eventType === 'wrapup'
+        ) {
+          return cleanLabel(
+            segment
+              .wrapUpCodeName,
+            segment.wrapUpCode
+              ? `Wrap-up ${segment.wrapUpCode}`
+              : 'Wrap-up'
+          );
+        }
+
+        if (
+          eventType ===
+            'disconnect'
+        ) {
+          return cleanLabel(
+            segment
+              .disconnectType ||
+            segment
+              .disconnectReason,
+            'Disconnect'
+          );
+        }
+
+        return cleanLabel(
+          item.segment
+            ?.segmentType,
+          eventType
+        );
+      }
+
+      const trace = rawSegments
+        .map(
+          (item, index) => {
+            const segment =
+              item.segment || {};
+
+            const startTime =
+              segment.segmentStart ||
+              segment.startTime ||
+              segment.start ||
+              null;
+
+            const endTime =
+              segment.segmentEnd ||
+              segment.endTime ||
+              segment.end ||
+              null;
+
+            const eventType =
+              deriveEventType(
+                item
+              );
+
+            const attributes =
+              includeAttributes &&
+              item.participantId
+                ? participantById.get(
+                    item.participantId
+                  )?.attributes ||
+                  {}
+                : undefined;
+
+            return {
+              sourceIndex:
+                index,
+              startTime,
+              endTime,
+              startTimestamp:
+                timestampMs(
+                  startTime
+                ),
+              endTimestamp:
+                timestampMs(
+                  endTime
+                ),
+              eventType,
+              label:
+                deriveLabel(
+                  eventType,
+                  item
+                ),
+              participantId:
+                item.participantId,
+              participantName:
+                item.participantName,
+              participantPurpose:
+                item.participantPurpose,
+              userId:
+                item.userId,
+              mediaType:
+                item.mediaType,
+              direction:
+                item.direction,
+              sessionId:
+                item.sessionId,
+              queueId:
+                segment.queueId ||
+                null,
+              queueName:
+                segment.queueName ||
+                null,
+              flowId:
+                segment.flowId ||
+                null,
+              flowName:
+                segment.flowName ||
+                null,
+              flowVersion:
+                segment.flowVersion ||
+                null,
+              segmentType:
+                segment.segmentType ||
+                null,
+              transferType:
+                segment.transferType ||
+                null,
+              transferTargetAddress:
+                segment
+                  .transferTargetAddress ||
+                null,
+              destinationParticipantId:
+                segment
+                  .destinationParticipantId ||
+                null,
+              wrapUpCodeId:
+                segment.wrapUpCode ||
+                null,
+              wrapUpCodeName:
+                segment
+                  .wrapUpCodeName ||
+                null,
+              disconnectType:
+                segment
+                  .disconnectType ||
+                null,
+              disconnectReason:
+                segment
+                  .disconnectReason ||
+                null,
+              durationMs:
+                durationMs(
+                  startTime,
+                  endTime
+                ),
+              attributes,
+            };
+          }
+        )
+        .sort(
+          (left, right) => {
+            const leftStart =
+              left.startTimestamp ??
+              Number.MAX_SAFE_INTEGER;
+
+            const rightStart =
+              right.startTimestamp ??
+              Number.MAX_SAFE_INTEGER;
+
+            if (
+              leftStart !== rightStart
+            ) {
+              return (
+                leftStart -
+                rightStart
+              );
+            }
+
+            const leftEnd =
+              left.endTimestamp ??
+              Number.MAX_SAFE_INTEGER;
+
+            const rightEnd =
+              right.endTimestamp ??
+              Number.MAX_SAFE_INTEGER;
+
+            if (
+              leftEnd !== rightEnd
+            ) {
+              return (
+                leftEnd -
+                rightEnd
+              );
+            }
+
+            return (
+              left.sourceIndex -
+              right.sourceIndex
+            );
+          }
+        )
+        .map(
+          (event, index) => ({
+            sequence:
+              index + 1,
+            eventId:
+              `event-${index + 1}`,
+            startTime:
+              event.startTime,
+            endTime:
+              event.endTime,
+            eventType:
+              event.eventType,
+            label:
+              event.label,
+            participantId:
+              event.participantId,
+            participantName:
+              event.participantName,
+            participantPurpose:
+              event.participantPurpose,
+            userId:
+              event.userId,
+            mediaType:
+              event.mediaType,
+            direction:
+              event.direction,
+            sessionId:
+              event.sessionId,
+            queueId:
+              event.queueId,
+            queueName:
+              event.queueName,
+            flowId:
+              event.flowId,
+            flowName:
+              event.flowName,
+            flowVersion:
+              event.flowVersion,
+            segmentType:
+              event.segmentType,
+            transferType:
+              event.transferType,
+            transferTargetAddress:
+              event
+                .transferTargetAddress,
+            destinationParticipantId:
+              event
+                .destinationParticipantId,
+            wrapUpCodeId:
+              event.wrapUpCodeId,
+            wrapUpCodeName:
+              event.wrapUpCodeName,
+            disconnectType:
+              event.disconnectType,
+            disconnectReason:
+              event.disconnectReason,
+            durationMs:
+              event.durationMs,
+            duration:
+              formatDuration(
+                event.durationMs
+              ),
+            attributes:
+              event.attributes,
+          })
+        );
+
+      const conversationStart =
+        firstDefined(
+          analytics
+            ?.conversationStart,
+          operational
+            ?.startTime,
+          ...trace.map(
+            (event) =>
+              event.startTime
+          )
+        ) || null;
+
+      const conversationEnd =
+        firstDefined(
+          analytics
+            ?.conversationEnd,
+          operational
+            ?.endTime
+        ) ||
+        trace
+          .map(
+            (event) =>
+              event.endTime
+          )
+          .filter(Boolean)
+          .sort()
+          .at(-1) ||
+        null;
+
+      const customerParticipants =
+        participants.filter(
+          (participant) => {
+            const purpose =
+              normalizePurpose(
+                participant.purpose
+              );
+
+            return (
+              purpose ===
+                'customer' ||
+              purpose ===
+                'external'
+            );
+          }
+        );
+
+      const ani =
+        firstDefined(
+          operational?.ani,
+          ...customerParticipants.map(
+            (participant) =>
+              participant.ani
+          ),
+          ...rawSegments.map(
+            (item) =>
+              item.ani
+          )
+        ) || null;
+
+      const aniName =
+        firstDefined(
+          operational?.aniName,
+          ...customerParticipants.map(
+            (participant) =>
+              participant
+                .aniName ||
+              participant.name
+          ),
+          ...rawSegments.map(
+            (item) =>
+              item.aniName
+          )
+        ) || null;
+
+      const dnis =
+        firstDefined(
+          operational?.dnis,
+          ...customerParticipants.map(
+            (participant) =>
+              participant.dnis
+          ),
+          ...rawSegments.map(
+            (item) =>
+              item.dnis
+          )
+        ) || null;
+
+      const queues = [
+        ...new Map(
+          trace
+            .filter(
+              (event) =>
+                event.queueId
+            )
+            .map(
+              (event) => [
+                event.queueId,
+                {
+                  id:
+                    event.queueId,
+                  name:
+                    event.queueName ||
+                    null,
+                },
+              ]
+            )
+        ).values(),
+      ];
+
+      const flows = [
+        ...new Map(
+          trace
+            .filter(
+              (event) =>
+                event.flowId
+            )
+            .map(
+              (event) => [
+                event.flowId,
+                {
+                  id:
+                    event.flowId,
+                  name:
+                    event.flowName ||
+                    null,
+                  version:
+                    event.flowVersion ||
+                    null,
+                },
+              ]
+            )
+        ).values(),
+      ];
+
+      const agents = [
+        ...new Map(
+          participants
+            .filter(
+              (participant) =>
+                normalizePurpose(
+                  participant.purpose
+                ) === 'agent'
+            )
+            .map(
+              (participant) => [
+                participant.userId ||
+                participant
+                  .participantId,
+                {
+                  participantId:
+                    participant
+                      .participantId,
+                  userId:
+                    participant
+                      .userId,
+                  name:
+                    participant.name ||
+                    null,
+                },
+              ]
+            )
+        ).values(),
+      ];
+
+      const transfers =
+        trace.filter(
+          (event) =>
+            event.eventType ===
+            'transfer'
+        );
+
+      const holds =
+        trace.filter(
+          (event) =>
+            event.eventType ===
+            'hold'
+        );
+
+      const totalHoldMs =
+        holds.reduce(
+          (total, event) =>
+            total +
+            (
+              Number.isFinite(
+                event.durationMs
+              )
+                ? event.durationMs
+                : 0
+            ),
+          0
+        );
+
+      const wrapUpCodes = [
+        ...new Map(
+          trace
+            .filter(
+              (event) =>
+                event.wrapUpCodeId
+            )
+            .map(
+              (event) => [
+                event
+                  .wrapUpCodeId,
+                {
+                  id:
+                    event
+                      .wrapUpCodeId,
+                  name:
+                    event
+                      .wrapUpCodeName ||
+                    null,
+                },
+              ]
+            )
+        ).values(),
+      ];
+
+      const disconnectReasons = [
+        ...new Set(
+          trace
+            .flatMap(
+              (event) => [
+                event
+                  .disconnectType,
+                event
+                  .disconnectReason,
+              ]
+            )
+            .filter(Boolean)
+        ),
+      ];
+
+      const customAttributes =
+        includeAttributes
+          ? participants
+              .filter(
+                (participant) =>
+                  participant
+                    .attributes &&
+                  Object.keys(
+                    participant
+                      .attributes
+                  ).length
+              )
+              .map(
+                (participant) => ({
+                  participantId:
+                    participant
+                      .participantId,
+                  participantName:
+                    participant.name,
+                  participantPurpose:
+                    participant.purpose,
+                  attributes:
+                    participant
+                      .attributes,
+                })
+              )
+          : [];
+
+      /*
+       * Visualization nodes correspond one-to-one
+       * with ordered trace events. This avoids the
+       * model having to infer chronology.
+       */
+      const nodes =
+        trace.map(
+          (event) => ({
+            id:
+              `step-${event.sequence}`,
+            sequence:
+              event.sequence,
+            type:
+              event.eventType,
+            label:
+              event.label,
+            subtitle:
+              firstDefined(
+                event.queueName,
+                event.flowName,
+                event.participantName,
+                event.segmentType
+              ) || null,
+            startTime:
+              event.startTime,
+            endTime:
+              event.endTime,
+            durationMs:
+              event.durationMs,
+            duration:
+              event.duration,
+            participantId:
+              event.participantId,
+            userId:
+              event.userId,
+            queueId:
+              event.queueId,
+            flowId:
+              event.flowId,
+            mediaType:
+              event.mediaType,
+            direction:
+              event.direction,
+          })
+        );
+
+      const edges = [];
+
+      for (
+        let index = 1;
+        index < nodes.length;
+        index++
+      ) {
+        const previous =
+          nodes[index - 1];
+
+        const current =
+          nodes[index];
+
+        edges.push({
+          id:
+            `edge-${index}`,
+          from:
+            previous.id,
+          to:
+            current.id,
+          label:
+            current.type ===
+              'transfer'
+              ? (
+                  trace[index]
+                    .transferType ||
+                  'transfer'
+                )
+              : null,
+        });
+      }
+
+      const mermaidLines = [
+        'flowchart LR',
+      ];
+
+      for (
+        const node of nodes
+      ) {
+        let shapeStart = '[';
+        let shapeEnd = ']';
+
+        if (
+          node.type === 'customer' ||
+          node.type === 'agent'
+        ) {
+          shapeStart = '([';
+          shapeEnd = '])';
+        } else if (
+          node.type === 'queue'
+        ) {
+          shapeStart = '[[';
+          shapeEnd = ']]';
+        } else if (
+          node.type === 'flow'
+        ) {
+          shapeStart = '{{';
+          shapeEnd = '}}';
+        } else if (
+          node.type ===
+            'disconnect'
+        ) {
+          shapeStart = '([';
+          shapeEnd = '])';
+        }
+
+        const durationText =
+          node.duration
+            ? `\\n${node.duration}`
+            : '';
+
+        mermaidLines.push(
+          `  ${node.id.replace(
+            /-/g,
+            '_'
+          )}${shapeStart}"${escapeMermaid(
+            node.label
+          )}${durationText}"${shapeEnd}`
+        );
+      }
+
+      for (
+        const edge of edges
+      ) {
+        const from =
+          edge.from.replace(
+            /-/g,
+            '_'
+          );
+
+        const to =
+          edge.to.replace(
+            /-/g,
+            '_'
+          );
+
+        if (edge.label) {
+          mermaidLines.push(
+            `  ${from} -->|"${escapeMermaid(
+              edge.label
+            )}"| ${to}`
+          );
+        } else {
+          mermaidLines.push(
+            `  ${from} --> ${to}`
+          );
+        }
+      }
+
+      const summary = {
+        conversationId,
+        conversationStart,
+        conversationEnd,
+        durationMs:
+          durationMs(
+            conversationStart,
+            conversationEnd
+          ),
+        duration:
+          formatDuration(
+            durationMs(
+              conversationStart,
+              conversationEnd
+            )
+          ),
+        ani,
+        aniName,
+        dnis,
+        mediaTypes: [
+          ...new Set(
+            trace
+              .map(
+                (event) =>
+                  event.mediaType
+              )
+              .filter(Boolean)
+          ),
+        ],
+        directions: [
+          ...new Set(
+            trace
+              .map(
+                (event) =>
+                  event.direction
+              )
+              .filter(Boolean)
+          ),
+        ],
+        participantCount:
+          participants.length,
+        agentCount:
+          agents.length,
+        queueCount:
+          queues.length,
+        flowCount:
+          flows.length,
+        transferCount:
+          transfers.length,
+        holdCount:
+          holds.length,
+        totalHoldMs,
+        totalHold:
+          formatDuration(
+            totalHoldMs
+          ),
+        eventCount:
+          trace.length,
+        queues,
+        flows,
+        agents,
+        wrapUpCodes,
+        disconnectReasons,
+      };
+
+      return {
+        summary,
+        trace,
+        participants,
+        customAttributes,
+        visualization: {
+          recommendedLayout:
+            'horizontal_timeline',
+          nodes,
+          edges,
+          mermaid:
+            mermaidLines.join(
+              '\n'
+            ),
+          legend: {
+            customer:
+              'External customer participant',
+            flow:
+              'Architect flow, IVR, bot, or workflow',
+            queue:
+              'ACD queue or queue segment',
+            alert:
+              'Agent alerting or contacting',
+            agent:
+              'Agent interaction',
+            hold:
+              'Hold segment',
+            transfer:
+              'Transfer event',
+            wrapup:
+              'After-call work or wrap-up',
+            disconnect:
+              'Interaction disconnect',
+            interaction:
+              'Other interaction segment',
+          },
+        },
+        retrieval: {
+          operationalConversationAvailable:
+            Boolean(operational),
+          analyticsDetailsAvailable:
+            Boolean(analytics),
+          operationalError:
+            operationalResult.status ===
+            'rejected'
+              ? (
+                  operationalResult
+                    .reason?.message ||
+                  'Request failed'
+                )
+              : null,
+          analyticsError:
+            analyticsResult.status ===
+            'rejected'
+              ? (
+                  analyticsResult
+                    .reason?.message ||
+                  'Request failed'
+                )
+              : null,
+        },
+        rawSegments:
+          includeRawSegments
+            ? rawSegments
+            : undefined,
+        note:
+          'The trace is ordered by segment start time. Simultaneous or overlapping participant segments can appear as adjacent events because a Genesys interaction may contain multiple active participants at the same time.',
+      };
+    },
+  },
   {
     name: 'list_queues',
     description: 'List routing queues (name, id, division). Optional name_filter supports * wildcards (e.g. "*support*").',
@@ -4802,7 +6359,7 @@ export const TOOL_GROUPS = [
   { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
   { name: 'Quality Management', icon: '📊', tools: ['list_quality_evaluations', 'get_quality_evaluation', 'get_quality_evaluation_form', 'get_quality_question_scores', 'get_quality_conversation', 'create_quality_evaluation_form',] },
   { name: 'Customer Surveys', icon: '📝', tools: ['list_quality_surveys', 'find_quality_survey_responses', 'get_quality_survey', 'get_quality_survey_form', 'get_quality_survey_question_scores', 'create_customer_survey_form',] },
-  { name: 'Conversations & Interaction Details', icon: '🔎', tools: ['search_conversations_by_attribute', 'get_conversation_details'] },
+  { name: 'Conversations & Interaction Details', icon: '🔎', tools: ['search_conversations_by_attribute', 'get_conversation_details', 'trace_interaction' ] },
   { name: 'Queues & Routing', icon: '📞', tools: ['list_queues', 'get_queue', 'create_queue', 'list_queue_members', 'update_queue_members', 'list_wrapup_codes', 'create_wrapup_code'] },
   { name: 'Users & Skills', icon: '👥', tools: ['list_users', 'get_user', 'create_user', 'list_skills', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'update_user_contact_options', 'set_user_direct_routing_tag'] },
   { name: 'Groups', icon: '👨‍👩‍👧‍👦', tools: ['update_group_users'] },
