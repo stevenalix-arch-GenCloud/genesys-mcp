@@ -12,6 +12,7 @@
 // production: true AND an explicit user yes - same rule as the outbound group:
 // the AI builds it, a human presses go.
 
+import { renderAvaQualityReport } from './ava-report.js';
 import { GenesysError, pathId } from './genesys.js';
 import { AVA_SKILLS, AVA_SKILLS_VERSION, AVA_SKILLS_RELEASE, AVA_SKILLS_SOURCE } from './ava-playbooks.js';
 import {
@@ -788,7 +789,77 @@ export const AVA_TOOLS = [
       return { id, overall, counts, markdown };
     },
   },
+  {
+    name: 'ava_generate_quality_report',
+    description: 'Generate a polished self-contained HTML quality report for an AVA using its stored scorecard and optional critique report. Use after ava_scorecard and, when available, ava_critique_report. Returns HTML suitable for saving, displaying, or converting to PDF.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: {
+          type: 'string',
+          description: 'Lifecycle slug for the AVA',
+        },
+        run_id: {
+          type: 'string',
+          description: 'Evaluation run id whose scorecard should be rendered',
+        },
+        critique_id: {
+          type: 'string',
+          description: 'Optional critique artifact id. If omitted, the report is generated without critique findings.',
+        },
+        title: {
+          type: 'string',
+          description: 'Optional report title',
+        },
+      },
+      required: ['slug', 'run_id'],
+      additionalProperties: false,
+    },
+    genesys: false,
+    handler: async (_gc, a, ctx) => {
+      const ws = workspace(ctx);
+      const slug = slugOf(a.slug);
+      const runId = segment('run_id', a.run_id);
 
+      const scorecard = await ws.get(slug, 'scorecard', runId);
+
+      if (!scorecard) {
+        throw new GenesysError(
+          `No scorecard found for run "${runId}" under slug "${slug}". Run ava_scorecard first.`,
+          404,
+        );
+      }
+
+      let critique = null;
+
+      if (a.critique_id) {
+        critique = await ws.get(slug, 'critique', a.critique_id);
+
+        if (!critique) {
+          throw new GenesysError(
+            `No critique "${a.critique_id}" found under slug "${slug}".`,
+            404,
+          );
+        }
+      }
+
+      const report = renderAvaQualityReport({
+        title: a.title,
+        slug,
+        runId,
+        scorecard,
+        critique,
+      });
+
+      return {
+        generated: true,
+        slug,
+        runId,
+        critiqueId: a.critique_id || null,
+        ...report,
+      };
+    },
+  },
   // ----- lifecycle workspace -----
   {
     name: 'ava_workspace_put',
