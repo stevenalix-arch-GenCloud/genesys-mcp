@@ -102,7 +102,6 @@ export const TOOLS = [
     },
   },
     // ----- mock data actions -----
-// ----- mock data actions -----
 {
   name: 'create_mock_data_action',
 
