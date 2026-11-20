@@ -102,178 +102,88 @@ export const TOOLS = [
     },
   },
     // ----- mock data actions -----
+// ----- mock data actions -----
+{
+  name: 'create_mock_data_action',
 
-  {
-    name: 'create_mock_data_action',
-    description:
-  'TEST AND DEMO ONLY. Create a MOCK Genesys Cloud Data Action that returns simulated data without calling a real backend system. ' +
-  'Use this only for AVA testing, demos, test scenarios, placeholders, or when a real API/backend is unavailable. ' +
-  'DO NOT use this tool when the user wants a real production Data Action or provides a real API endpoint. ' +
-  'For a real backend integration, use create_data_action instead.',
+  description:
+    'TEST AND DEMO ONLY. Create a MOCK Genesys Cloud Data Action that returns ' +
+    'simulated data without calling a real production backend system. ' +
+    'Use this only for AVA testing, demonstrations, placeholders, and controlled test scenarios. ' +
+    'The tool targets an explicitly supplied integration ID or resolves one exact active integration by name. ' +
+    'DO NOT use this tool when the user wants a production Data Action connected to a real API. ' +
+    'For a real backend integration, use create_data_action instead.',
 
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: {
-          type: 'string',
-          description:
-            'Name for the mock Data Action, such as "Mock - Look Up Appointment".',
-        },
-        category: {
-          type: 'string',
-          description:
-            'Category used to organize the mock Data Action. Defaults to "AVA Mock Data Actions".',
-        },
-        input_contract: {
-          type: 'object',
-          description:
-            'JSON Schema describing the inputs accepted by the mock Data Action.',
-          additionalProperties: true,
-        },
-        output_contract: {
-          type: 'object',
-          description:
-            'JSON Schema describing the response returned by the mock Data Action.',
-          additionalProperties: true,
-        },
-        mock_response: {
-          type: 'object',
-          description:
-            'The JSON object the mock Data Action should return during AVA testing.',
-          additionalProperties: true,
-        },
+  inputSchema: {
+    type: 'object',
+
+    properties: {
+      name: {
+        type: 'string',
+        description:
+          'Name for the mock Data Action, such as "Mock - Look Up Appointment".',
       },
 
-      required: [
-        'name',
-        'input_contract',
-        'output_contract',
-        'mock_response',
-      ],
+      category: {
+        type: 'string',
+        description:
+          'Category used to organize the mock Data Action. ' +
+          'Defaults to "AVA Mock Data Actions".',
+      },
 
-      additionalProperties: false,
+      integration_id: {
+        type: 'string',
+        description:
+          'Optional Genesys Cloud integration ID. When omitted, the tool searches ' +
+          'for one exact enabled integration matching integration_name.',
+      },
+
+      integration_name: {
+        type: 'string',
+        description:
+          'Exact name of the Genesys Cloud integration to use. ' +
+          'Defaults to "Mock Data Actions - Salix".',
+      },
+
+      input_contract: {
+        type: 'object',
+        description:
+          'JSON Schema describing the inputs accepted by the mock Data Action.',
+        additionalProperties: true,
+      },
+
+      output_contract: {
+        type: 'object',
+        description:
+          'JSON Schema describing the response returned by the mock Data Action.',
+        additionalProperties: true,
+      },
+
+      mock_response: {
+        type: 'object',
+        description:
+          'The fixed JSON object returned by the mock Data Action during AVA testing.',
+        additionalProperties: true,
+      },
     },
 
-    handler: async (gc, a) => {
-      const name = String(a.name || '').trim();
+    required: [
+      'name',
+      'input_contract',
+      'output_contract',
+      'mock_response',
+    ],
 
-      if (!name) {
-        throw new GenesysError(
-          'name is required.',
-          400
-        );
-      }
-
-      const category =
-        String(a.category || '').trim() ||
-        'AVA Mock Data Actions';
-
-      if (!a.input_contract || typeof a.input_contract !== 'object') {
-        throw new GenesysError(
-          'input_contract must be a JSON Schema object.',
-          400
-        );
-      }
-
-      if (!a.output_contract || typeof a.output_contract !== 'object') {
-        throw new GenesysError(
-          'output_contract must be a JSON Schema object.',
-          400
-        );
-      }
-
-      if (!a.mock_response || typeof a.mock_response !== 'object') {
-        throw new GenesysError(
-          'mock_response must be a JSON object.',
-          400
-        );
-      }
-
-      const integrations = await gc.get(
-        '/api/v2/integrations',
-        {
-          pageSize: 100,
-        }
-      );
-
-      const entities = integrations.entities || [];
-
-      const dataActionIntegration = entities.find(
-        (integration) =>
-          integration.integrationType?.id ===
-          'custom-rest-actions'
-      );
-
-      if (!dataActionIntegration) {
-        throw new GenesysError(
-          'No Web Services Data Actions integration was found in this Genesys Cloud organization. Create or enable a Web Services Data Actions integration before creating mock actions.',
-          404
-        );
-      }
-
-      const actionBody = {
-        name,
-        category,
-        integrationId: dataActionIntegration.id,
-
-        contract: {
-          input: a.input_contract,
-          output: a.output_contract,
-        },
-
-        config: {
-          request: {
-            requestUrlTemplate:
-              'https://example.invalid/ava-mock',
-
-            requestType: 'POST',
-
-            headers: {},
-
-            requestTemplate:
-              '${input.rawRequest}',
-          },
-
-          response: {
-            translationMap: {
-              mockResponse:
-                JSON.stringify(a.mock_response),
-            },
-
-            translationMapDefaults: {},
-
-            successTemplate:
-              '${mockResponse}',
-          },
-        },
-
-        secure: false,
-      };
-
-      const created = await gc.post(
-        '/api/v2/integrations/actions',
-        actionBody
-      );
-
-      return {
-        created: true,
-
-        action: {
-          id: created.id,
-          name: created.name,
-          category: created.category,
-          integrationId:
-            created.integrationId ||
-            dataActionIntegration.id,
-        },
-
-        mockResponse: a.mock_response,
-
-        note:
-          'Mock Data Action created for AVA testing. Review and test the action in Genesys Cloud before using it in a production flow.',
-      };
-    },
+    additionalProperties: false,
   },
+
+  handler: async (gc, a) => {
+    const name = String(a.name || '').trim();
+
+    if (!name) {
+      throw new GenesysError(
+        'name is required.',
+       
    {
     name: 'replace_mock_responses',
     description:
