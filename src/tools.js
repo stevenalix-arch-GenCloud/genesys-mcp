@@ -101,6 +101,178 @@ export const TOOLS = [
       };
     },
   },
+    // ----- mock data actions -----
+
+  {
+    name: 'create_mock_data_action',
+    description:
+      'Create a mock Genesys Cloud Data Action for AVA development and testing. ' +
+      'Use this when an AVA needs a simulated backend response, such as an appointment lookup, ' +
+      'without requiring the real external system. The mock action is intended for testing only.',
+
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description:
+            'Name for the mock Data Action, such as "Mock - Look Up Appointment".',
+        },
+        category: {
+          type: 'string',
+          description:
+            'Category used to organize the mock Data Action. Defaults to "AVA Mock Data Actions".',
+        },
+        input_contract: {
+          type: 'object',
+          description:
+            'JSON Schema describing the inputs accepted by the mock Data Action.',
+          additionalProperties: true,
+        },
+        output_contract: {
+          type: 'object',
+          description:
+            'JSON Schema describing the response returned by the mock Data Action.',
+          additionalProperties: true,
+        },
+        mock_response: {
+          type: 'object',
+          description:
+            'The JSON object the mock Data Action should return during AVA testing.',
+          additionalProperties: true,
+        },
+      },
+
+      required: [
+        'name',
+        'input_contract',
+        'output_contract',
+        'mock_response',
+      ],
+
+      additionalProperties: false,
+    },
+
+    handler: async (gc, a) => {
+      const name = String(a.name || '').trim();
+
+      if (!name) {
+        throw new GenesysError(
+          'name is required.',
+          400
+        );
+      }
+
+      const category =
+        String(a.category || '').trim() ||
+        'AVA Mock Data Actions';
+
+      if (!a.input_contract || typeof a.input_contract !== 'object') {
+        throw new GenesysError(
+          'input_contract must be a JSON Schema object.',
+          400
+        );
+      }
+
+      if (!a.output_contract || typeof a.output_contract !== 'object') {
+        throw new GenesysError(
+          'output_contract must be a JSON Schema object.',
+          400
+        );
+      }
+
+      if (!a.mock_response || typeof a.mock_response !== 'object') {
+        throw new GenesysError(
+          'mock_response must be a JSON object.',
+          400
+        );
+      }
+
+      const integrations = await gc.get(
+        '/api/v2/integrations',
+        {
+          pageSize: 100,
+        }
+      );
+
+      const entities = integrations.entities || [];
+
+      const dataActionIntegration = entities.find(
+        (integration) =>
+          integration.integrationType?.id ===
+          'custom-rest-actions'
+      );
+
+      if (!dataActionIntegration) {
+        throw new GenesysError(
+          'No Web Services Data Actions integration was found in this Genesys Cloud organization. Create or enable a Web Services Data Actions integration before creating mock actions.',
+          404
+        );
+      }
+
+      const actionBody = {
+        name,
+        category,
+        integrationId: dataActionIntegration.id,
+
+        contract: {
+          input: a.input_contract,
+          output: a.output_contract,
+        },
+
+        config: {
+          request: {
+            requestUrlTemplate:
+              'https://example.invalid/ava-mock',
+
+            requestType: 'POST',
+
+            headers: {},
+
+            requestTemplate:
+              '${input.rawRequest}',
+          },
+
+          response: {
+            translationMap: {
+              mockResponse:
+                JSON.stringify(a.mock_response),
+            },
+
+            translationMapDefaults: {},
+
+            successTemplate:
+              '${mockResponse}',
+          },
+        },
+
+        secure: false,
+      };
+
+      const created = await gc.post(
+        '/api/v2/integrations/actions',
+        actionBody
+      );
+
+      return {
+        created: true,
+
+        action: {
+          id: created.id,
+          name: created.name,
+          category: created.category,
+          integrationId:
+            created.integrationId ||
+            dataActionIntegration.id,
+        },
+
+        mockResponse: a.mock_response,
+
+        note:
+          'Mock Data Action created for AVA testing. Review and test the action in Genesys Cloud before using it in a production flow.',
+      };
+    },
+  },
   // ----- quality management -----
    {
     name: 'create_quality_evaluation_form',
@@ -7798,7 +7970,7 @@ export async function callTool(cfg, name, args = {}) {
 // UI metadata - which tools are writes, and how they group on the landing page.
 export const WRITE_TOOLS = new Set([
   'create_queue', 'create_user', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'set_user_direct_routing_tag', 'update_user_contact_options',
-  'create_schedule', 'create_schedule_group', 'create_customer_survey_form', 'update_group_users', 'create_quality_evaluation_form',
+  'create_schedule', 'create_schedule_group', 'create_customer_survey_form', 'update_group_users', 'create_quality_evaluation_form', 'create_mock_data_action',
   'create_contact_list', 'add_contacts', 'create_attempt_limits',
   'create_callable_time_set', 'create_dnc_list', 'create_campaign',
   'create_campaign_sequence',
@@ -7808,6 +7980,7 @@ export const WRITE_TOOLS = new Set([
 
 export const TOOL_GROUPS = [
   { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
+  { name: 'Mock Data Actions', icon: '🧪', tools: ['create_mock_data_action'] },
   { name: 'Quality Management', icon: '📊', tools: ['list_quality_evaluations', 'get_quality_evaluation', 'get_quality_evaluation_form', 'get_quality_question_scores', 'get_quality_conversation', 'create_quality_evaluation_form',] },
   { name: 'Customer Surveys', icon: '📝', tools: ['list_quality_surveys', 'find_quality_survey_responses', 'get_quality_survey', 'get_quality_survey_form', 'get_quality_survey_question_scores', 'create_customer_survey_form',] },
   { name: 'Conversations & Interaction Details', icon: '🔎', tools: ['search_conversations_by_attribute', 'get_conversation_details', 'trace_interaction', 'find_repeat_contacts' ] },
