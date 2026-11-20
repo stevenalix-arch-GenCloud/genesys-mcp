@@ -106,9 +106,10 @@ export const TOOLS = [
   {
     name: 'create_mock_data_action',
     description:
-      'Create a mock Genesys Cloud Data Action for AVA development and testing. ' +
-      'Use this when an AVA needs a simulated backend response, such as an appointment lookup, ' +
-      'without requiring the real external system. The mock action is intended for testing only.',
+  'TEST AND DEMO ONLY. Create a MOCK Genesys Cloud Data Action that returns simulated data without calling a real backend system. ' +
+  'Use this only for AVA testing, demos, test scenarios, placeholders, or when a real API/backend is unavailable. ' +
+  'DO NOT use this tool when the user wants a real production Data Action or provides a real API endpoint. ' +
+  'For a real backend integration, use create_data_action instead.',
 
     inputSchema: {
       type: 'object',
@@ -276,8 +277,9 @@ export const TOOLS = [
    {
     name: 'replace_mock_responses',
     description:
-      'Replace the stored mock response for an existing mock Genesys Cloud Data Action used for AVA development and testing. ' +
-      'Use this to change test conditions without creating a new Data Action.',
+  'TEST AND DEMO ONLY. Change the simulated response returned by an existing MOCK Data Action created for AVA testing. ' +
+  'Use this to simulate conditions such as success, not found, multiple results, or errors. ' +
+  'DO NOT use this tool to modify a real production Data Action or a Data Action connected to a real backend.',
 
     inputSchema: {
       type: 'object',
