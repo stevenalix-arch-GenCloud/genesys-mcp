@@ -273,6 +273,189 @@ export const TOOLS = [
       };
     },
   },
+   {
+    name: 'replace_mock_responses',
+    description:
+      'Replace the stored mock response for an existing mock Genesys Cloud Data Action used for AVA development and testing. ' +
+      'Use this to change test conditions without creating a new Data Action.',
+
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          description:
+            'Existing mock Data Action name or Genesys Cloud action ID.',
+        },
+        mock_response: {
+          type: 'object',
+          description:
+            'The new JSON object the mock Data Action should return during AVA testing.',
+          additionalProperties: true,
+        },
+      },
+
+      required: [
+        'action',
+        'mock_response',
+      ],
+
+      additionalProperties: false,
+    },
+
+    handler: async (gc, a) => {
+      const actionRef = String(a.action || '').trim();
+
+      if (!actionRef) {
+        throw new GenesysError(
+          'action is required.',
+          400
+        );
+      }
+
+      if (
+        !a.mock_response ||
+        typeof a.mock_response !== 'object' ||
+        Array.isArray(a.mock_response)
+      ) {
+        throw new GenesysError(
+          'mock_response must be a JSON object.',
+          400
+        );
+      }
+
+      let existingAction;
+
+      if (GUID_RE.test(actionRef)) {
+        existingAction = await gc.get(
+          `/api/v2/integrations/actions/${pathId(actionRef)}`
+        );
+      } else {
+        const actions = await gc.listAll(
+          '/api/v2/integrations/actions',
+          {},
+          { max: 500 }
+        );
+
+        const exactMatches = actions.entities.filter(
+          (action) =>
+            action.name?.toLowerCase() ===
+            actionRef.toLowerCase()
+        );
+
+        if (!exactMatches.length) {
+          throw new GenesysError(
+            `No Data Action found matching "${actionRef}".`,
+            404
+          );
+        }
+
+        if (exactMatches.length > 1) {
+          throw new GenesysError(
+            `More than one Data Action is named "${actionRef}". Use the action ID instead.`,
+            409
+          );
+        }
+
+        existingAction = exactMatches[0];
+
+        /*
+         * listAll may return only the list representation.
+         * Retrieve the complete action before updating it.
+         */
+        existingAction = await gc.get(
+          `/api/v2/integrations/actions/${pathId(existingAction.id)}`
+        );
+      }
+
+      if (!existingAction?.id) {
+        throw new GenesysError(
+          'The existing Data Action could not be loaded.',
+          404
+        );
+      }
+
+      const existingConfig = existingAction.config || {};
+      const existingRequest = existingConfig.request || {};
+      const existingResponse = existingConfig.response || {};
+      const existingTranslationMap =
+        existingResponse.translationMap || {};
+
+      /*
+       * Safety check: only update actions created using our
+       * mock-response convention.
+       */
+      if (
+        !Object.prototype.hasOwnProperty.call(
+          existingTranslationMap,
+          'mockResponse'
+        )
+      ) {
+        throw new GenesysError(
+          `Data Action "${existingAction.name || existingAction.id}" does not appear to be a mock Data Action created by this MCP. No changes were made.`,
+          400
+        );
+      }
+
+      const updatedAction = {
+        ...existingAction,
+
+        config: {
+          ...existingConfig,
+
+          request: {
+            ...existingRequest,
+          },
+
+          response: {
+            ...existingResponse,
+
+            translationMap: {
+              ...existingTranslationMap,
+              mockResponse:
+                JSON.stringify(a.mock_response),
+            },
+          },
+        },
+      };
+
+      /*
+       * Remove read-only metadata that should not be sent
+       * back in the update payload.
+       */
+      delete updatedAction.id;
+      delete updatedAction.selfUri;
+      delete updatedAction.version;
+      delete updatedAction.modifiedBy;
+      delete updatedAction.modifiedDate;
+      delete updatedAction.dateModified;
+
+      const saved = await gc.put(
+        `/api/v2/integrations/actions/${pathId(existingAction.id)}`,
+        updatedAction
+      );
+
+      return {
+        updated: true,
+
+        action: {
+          id: saved.id || existingAction.id,
+          name: saved.name || existingAction.name,
+          category:
+            saved.category ||
+            existingAction.category,
+          integrationId:
+            saved.integrationId ||
+            existingAction.integrationId,
+        },
+
+        mockResponse: a.mock_response,
+
+        note:
+          'The mock response was replaced. The next AVA test using this Data Action will use the new configured mock response.',
+      };
+    },
+  }, 
   // ----- quality management -----
    {
     name: 'create_quality_evaluation_form',
@@ -7970,7 +8153,7 @@ export async function callTool(cfg, name, args = {}) {
 // UI metadata - which tools are writes, and how they group on the landing page.
 export const WRITE_TOOLS = new Set([
   'create_queue', 'create_user', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'set_user_direct_routing_tag', 'update_user_contact_options',
-  'create_schedule', 'create_schedule_group', 'create_customer_survey_form', 'update_group_users', 'create_quality_evaluation_form', 'create_mock_data_action',
+  'create_schedule', 'create_schedule_group', 'create_customer_survey_form', 'update_group_users', 'create_quality_evaluation_form', 'create_mock_data_action', 'replace_mock_responses',
   'create_contact_list', 'add_contacts', 'create_attempt_limits',
   'create_callable_time_set', 'create_dnc_list', 'create_campaign',
   'create_campaign_sequence',
@@ -7980,7 +8163,7 @@ export const WRITE_TOOLS = new Set([
 
 export const TOOL_GROUPS = [
   { name: 'Org & Connection', icon: '🔌', tools: ['about', 'check_connection', 'list_divisions', 'list_did_pools'] },
-  { name: 'Mock Data Actions', icon: '🧪', tools: ['create_mock_data_action'] },
+  { name: 'Mock Data Actions', icon: '🧪', tools: ['create_mock_data_action', 'replace_mock_responses' ] },
   { name: 'Quality Management', icon: '📊', tools: ['list_quality_evaluations', 'get_quality_evaluation', 'get_quality_evaluation_form', 'get_quality_question_scores', 'get_quality_conversation', 'create_quality_evaluation_form',] },
   { name: 'Customer Surveys', icon: '📝', tools: ['list_quality_surveys', 'find_quality_survey_responses', 'get_quality_survey', 'get_quality_survey_form', 'get_quality_survey_question_scores', 'create_customer_survey_form',] },
   { name: 'Conversations & Interaction Details', icon: '🔎', tools: ['search_conversations_by_attribute', 'get_conversation_details', 'trace_interaction', 'find_repeat_contacts' ] },
