@@ -102,6 +102,7 @@ export const TOOLS = [
     },
   },
     // ----- mock data actions -----
+
 {
   name: 'create_mock_data_action',
 
@@ -182,6 +183,270 @@ export const TOOLS = [
     if (!name) {
       throw new GenesysError(
         'name is required.',
+        400,
+      );
+    }
+
+    const category =
+      String(a.category || '').trim() ||
+      'AVA Mock Data Actions';
+
+    const requestedIntegrationId =
+      String(a.integration_id || '').trim();
+
+    const requestedIntegrationName =
+      String(a.integration_name || '').trim() ||
+      'Mock Data Actions - Salix';
+
+    if (
+      !a.input_contract ||
+      typeof a.input_contract !== 'object' ||
+      Array.isArray(a.input_contract)
+    ) {
+      throw new GenesysError(
+        'input_contract must be a JSON Schema object.',
+        400,
+      );
+    }
+
+    if (
+      !a.output_contract ||
+      typeof a.output_contract !== 'object' ||
+      Array.isArray(a.output_contract)
+    ) {
+      throw new GenesysError(
+        'output_contract must be a JSON Schema object.',
+        400,
+      );
+    }
+
+    if (
+      !a.mock_response ||
+      typeof a.mock_response !== 'object' ||
+      Array.isArray(a.mock_response)
+    ) {
+      throw new GenesysError(
+        'mock_response must be a JSON object.',
+        400,
+      );
+    }
+
+    /*
+     * Resolve the integration deterministically.
+     *
+     * Order:
+     * 1. Use integration_id when explicitly supplied.
+     * 2. Otherwise find one exact enabled integration by name.
+     *
+     * Never select the first generic Data Actions integration.
+     */
+    let integration;
+
+    if (requestedIntegrationId) {
+      if (!GUID_RE.test(requestedIntegrationId)) {
+        throw new GenesysError(
+          'integration_id must be a valid Genesys Cloud GUID.',
+          400,
+        );
+      }
+
+      integration = await gc.get(
+        `/api/v2/integrations/${pathId(requestedIntegrationId)}`,
+      );
+
+      if (!integration?.id) {
+        throw new GenesysError(
+          `The integration "${requestedIntegrationId}" could not be retrieved.`,
+          404,
+        );
+      }
+    } else {
+      const integrationsResponse = await gc.get(
+        '/api/v2/integrations',
+        {
+          pageSize: 100,
+        },
+      );
+
+      const integrations = Array.isArray(integrationsResponse?.entities)
+        ? integrationsResponse.entities
+        : [];
+
+      const exactMatches = integrations.filter((candidate) => {
+        const candidateName = String(candidate?.name || '')
+          .trim()
+          .toLowerCase();
+
+        return (
+          candidateName === requestedIntegrationName.toLowerCase() &&
+          candidate?.enabled !== false
+        );
+      });
+
+      if (!exactMatches.length) {
+        throw new GenesysError(
+          `No enabled Genesys Cloud integration was found with the exact name ` +
+          `"${requestedIntegrationName}". Supply integration_id explicitly or ` +
+          'verify that the integration exists and is enabled.',
+          404,
+        );
+      }
+
+      if (exactMatches.length > 1) {
+        const matchingIds = exactMatches
+          .map((candidate) => candidate.id)
+          .filter(Boolean)
+          .join(', ');
+
+        throw new GenesysError(
+          `More than one enabled integration is named ` +
+          `"${requestedIntegrationName}". Supply integration_id explicitly. ` +
+          `Matching IDs: ${matchingIds}`,
+          409,
+        );
+      }
+
+      integration = exactMatches[0];
+    }
+
+    if (integration.enabled === false) {
+      throw new GenesysError(
+        `Integration "${integration.name || integration.id}" is disabled.`,
+        409,
+      );
+    }
+
+    /*
+     * This guards against accidentally selecting Salesforce, AWS Lambda,
+     * a generic web services integration, or another unrelated integration.
+     */
+    const integrationType = String(
+      integration?.integrationType?.id ||
+      integration?.integrationType?.name ||
+      integration?.type ||
+      '',
+    ).toLowerCase();
+
+    if (
+      integrationType &&
+      !integrationType.includes('purecloud-data-actions')
+    ) {
+      throw new GenesysError(
+        `Integration "${integration.name || integration.id}" has type ` +
+        `"${integrationType}", not "purecloud-data-actions". ` +
+        'Refusing to create the mock action on the wrong integration.',
+        409,
+      );
+    }
+
+    const mockResponseJson = JSON.stringify(a.mock_response);
+
+    /*
+     * Important:
+     * integrationId is explicitly included in the creation payload.
+     * This prevents Genesys or the tool from selecting a different
+     * Data Actions integration.
+     */
+    const payload = {
+      name,
+      category,
+      integrationId: integration.id,
+
+      contract: {
+        input: a.input_contract,
+        output: a.output_contract,
+      },
+
+      config: {
+        request: {
+          requestUrlTemplate: 'https://example.invalid/ava-mock',
+          requestType: 'POST',
+          headers: {},
+          requestTemplate: '${input.rawRequest}',
+        },
+
+        response: {
+          translationMap: {
+            mockResponse: mockResponseJson,
+          },
+
+          translationMapDefaults: {},
+
+          successTemplate: '${mockResponse}',
+        },
+      },
+
+      secure: false,
+    };
+
+    let createdAction;
+
+    try {
+      createdAction = await gc.post(
+        '/api/v2/integrations/actions',
+        payload,
+      );
+    } catch (error) {
+      /*
+       * Preserve the original Genesys details when the client exposes them.
+       * Different GenesysClient implementations may place the API response
+       * in different properties, so check the common locations.
+       */
+      const genesysDetails =
+        error?.responseBody ||
+        error?.body ||
+        error?.details ||
+        error?.response?.data ||
+        error?.message ||
+        error;
+
+      let detailText;
+
+      try {
+        detailText =
+          typeof genesysDetails === 'string'
+            ? genesysDetails
+            : JSON.stringify(genesysDetails);
+      } catch {
+        detailText = String(genesysDetails);
+      }
+
+      throw new GenesysError(
+        `Genesys Cloud rejected creation of mock Data Action "${name}" ` +
+        `on integration "${integration.name || integration.id}" ` +
+        `(${integration.id}). Details: ${detailText}`,
+        error?.status ||
+          error?.statusCode ||
+          error?.response?.status ||
+          400,
+      );
+    }
+
+    return {
+      created: true,
+      testOnly: true,
+
+      action: {
+        id: createdAction?.id || null,
+        name: createdAction?.name || name,
+        category: createdAction?.category || category,
+      },
+
+      integration: {
+        id: integration.id,
+        name: integration.name || requestedIntegrationName,
+        type: integrationType || null,
+        enabled: integration.enabled !== false,
+      },
+
+      mockResponse: a.mock_response,
+
+      message:
+        `Created test-only mock Data Action "${name}" on ` +
+        `"${integration.name || integration.id}".`,
+    };
+  },
+},
        
    {
     name: 'replace_mock_responses',
