@@ -8578,7 +8578,7 @@ export async function callTool(cfg, name, args = {}) {
 export const WRITE_TOOLS = new Set([
   'create_queue', 'create_user', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'set_user_direct_routing_tag', 'update_user_contact_options',
   'create_schedule', 'create_schedule_group', 'create_customer_survey_form', 'update_group_users', 'create_quality_evaluation_form', 'create_mock_data_action', 'replace_mock_responses',
-  'create_contact_list', 'add_contacts', 'create_attempt_limits', 'create_flow_outcome', 'list_flow_outcomes'
+  'create_contact_list', 'add_contacts', 'create_attempt_limits', 'create_flow_outcome', 'list_flow_outcomes',
   'create_callable_time_set', 'create_dnc_list', 'create_campaign',
   'create_campaign_sequence',
   'publish_flow', 'unlock_flow', 'genesys_api_call',
