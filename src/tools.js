@@ -7518,7 +7518,255 @@ const currentMemberIds = new Set(
       return { total: r.total, prompts: r.entities.map((p) => ({ id: p.id, name: p.name, description: p.description })) };
     },
   },
+  {
+    name: 'list_flow_outcomes',
+    description: 'List Genesys Cloud Architect flow outcomes. Flow outcomes are reusable business-result objects that can be initialized and set to success or failure inside Architect flows.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name_filter: {
+          type: 'string',
+          description: 'Optional outcome name filter. Matching is performed case-insensitively against the returned outcomes.',
+        },
+      },
+      additionalProperties: false,
+    },
 
+    handler: async (gc, a) => {
+      const result =
+        await gc.listAll(
+          '/api/v2/flows/outcomes'
+        );
+
+      let outcomes =
+        Array.isArray(
+          result.entities
+        )
+          ? result.entities
+          : [];
+
+      if (
+        a.name_filter &&
+        String(
+          a.name_filter
+        ).trim()
+      ) {
+        const filter =
+          String(
+            a.name_filter
+          )
+            .trim()
+            .toLowerCase();
+
+        outcomes =
+          outcomes.filter(
+            (outcome) =>
+              String(
+                outcome.name || ''
+              )
+                .toLowerCase()
+                .includes(filter)
+          );
+      }
+
+      return {
+        total:
+          outcomes.length,
+        truncated:
+          result.truncated ||
+          false,
+        outcomes:
+          outcomes.map(
+            (outcome) => ({
+              id:
+                outcome.id,
+              name:
+                outcome.name,
+              description:
+                outcome.description ||
+                null,
+              divisionId:
+                outcome.division?.id ||
+                outcome.divisionId ||
+                null,
+              divisionName:
+                outcome.division?.name ||
+                null,
+              dateCreated:
+                outcome.dateCreated ||
+                null,
+              dateModified:
+                outcome.dateModified ||
+                null,
+            })
+          ),
+      };
+    },
+  },
+    {
+    name: 'create_flow_outcome',
+    description: 'Create a reusable Genesys Cloud Architect flow outcome. The outcome can later be referenced by Architect Initialize Flow Outcome and Set Flow Outcome actions. If an outcome with the same exact name already exists, the tool returns the existing outcome instead of creating a duplicate.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Flow outcome name',
+        },
+        description: {
+          type: 'string',
+          description: 'Optional description explaining the business result measured by this outcome',
+        },
+        division: {
+          type: 'string',
+          description: 'Optional Genesys Cloud division name or id',
+        },
+      },
+      required: [
+        'name',
+      ],
+      additionalProperties: false,
+    },
+
+    handler: async (gc, a) => {
+      const name = String(
+        a.name || ''
+      ).trim();
+
+      if (!name) {
+        throw new GenesysError(
+          'name is required.',
+          400
+        );
+      }
+
+      /*
+       * Outcomes cannot be deleted in the normal
+       * lifecycle, so avoid creating accidental
+       * duplicates.
+       */
+      const existingResult =
+        await gc.listAll(
+          '/api/v2/flows/outcomes'
+        );
+
+      const existingOutcomes =
+        Array.isArray(
+          existingResult.entities
+        )
+          ? existingResult.entities
+          : [];
+
+      const existing =
+        existingOutcomes.find(
+          (outcome) =>
+            String(
+              outcome.name || ''
+            )
+              .trim()
+              .toLowerCase() ===
+            name.toLowerCase()
+        );
+
+      if (existing) {
+        return {
+          created:
+            false,
+          existing:
+            true,
+          id:
+            existing.id,
+          name:
+            existing.name,
+          description:
+            existing.description ||
+            null,
+          divisionId:
+            existing.division?.id ||
+            existing.divisionId ||
+            null,
+          divisionName:
+            existing.division?.name ||
+            null,
+          note:
+            'A flow outcome with this exact name already exists. No duplicate was created.',
+        };
+      }
+
+      const body = {
+        name,
+      };
+
+      if (
+        a.description &&
+        String(
+          a.description
+        ).trim()
+      ) {
+        body.description =
+          String(
+            a.description
+          ).trim();
+      }
+
+      let division = null;
+
+      if (
+        a.division &&
+        String(
+          a.division
+        ).trim()
+      ) {
+        division =
+          await resolveOne(
+            gc,
+            'division',
+            '/api/v2/authorization/divisions',
+            String(
+              a.division
+            ).trim()
+          );
+
+        body.division = {
+          id:
+            division.id,
+        };
+      }
+
+      const outcome =
+        await gc.post(
+          '/api/v2/flows/outcomes',
+          body
+        );
+
+      return {
+        created:
+          true,
+        existing:
+          false,
+        id:
+          outcome.id,
+        name:
+          outcome.name ||
+          name,
+        description:
+          outcome.description ||
+          body.description ||
+          null,
+        divisionId:
+          outcome.division?.id ||
+          outcome.divisionId ||
+          division?.id ||
+          null,
+        divisionName:
+          outcome.division?.name ||
+          division?.name ||
+          null,
+        note:
+          'Flow outcome created. It can now be referenced by Architect flow outcome actions.',
+      };
+    },
+  },
   // ----- schedules & hours -----
   {
     name: 'list_schedules',
@@ -8330,7 +8578,7 @@ export async function callTool(cfg, name, args = {}) {
 export const WRITE_TOOLS = new Set([
   'create_queue', 'create_user', 'update_queue_members', 'create_wrapup_code', 'create_skill', 'assign_user_skill', 'remove_user_skill', 'set_user_direct_routing_tag', 'update_user_contact_options',
   'create_schedule', 'create_schedule_group', 'create_customer_survey_form', 'update_group_users', 'create_quality_evaluation_form', 'create_mock_data_action', 'replace_mock_responses',
-  'create_contact_list', 'add_contacts', 'create_attempt_limits',
+  'create_contact_list', 'add_contacts', 'create_attempt_limits', 'create_flow_outcome', 'list_flow_outcomes'
   'create_callable_time_set', 'create_dnc_list', 'create_campaign',
   'create_campaign_sequence',
   'publish_flow', 'unlock_flow', 'genesys_api_call',
@@ -8348,6 +8596,7 @@ export const TOOL_GROUPS = [
   { name: 'Groups', icon: '👨‍👩‍👧‍👦', tools: ['update_group_users'] },
   { name: 'Schedules & Hours', icon: '🕐', tools: ['list_schedules', 'create_schedule', 'create_schedule_group'] },
   { name: 'Outbound (Campaigns & Cadences)', icon: '📤', tools: ['list_contact_lists', 'get_contact_list', 'create_contact_list', 'add_contacts', 'create_attempt_limits', 'create_callable_time_set', 'create_dnc_list', 'list_campaigns', 'get_campaign', 'create_campaign', 'create_campaign_sequence', 'list_outbound_assets', 'render_cadence'] },
+  { name: 'Flow Analytics & Instrumentation', icon: '📈', tools: ['list_flow_outcomes', 'create_flow_outcome']},
   { name: 'Flows (Architect)', icon: '🌳', tools: ['list_flows', 'get_flow', 'get_flow_configuration', 'list_prompts', 'render_flow', 'export_flow', 'get_bot_flow_intents'] },
   { name: 'Flow Builder', icon: '🏗️', tools: ['build_flow', 'publish_flow', 'get_flow_job', 'unlock_flow'] },
   AVA_TOOL_GROUP,
